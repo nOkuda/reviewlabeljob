@@ -9,7 +9,7 @@ import random
 
 APP = flask.Flask(__name__, static_url_path='')
 # users must label REQUIRED_DOCS documents
-REQUIRED_DOCS = 100
+REQUIRED_DOCS = 10
 ORDER_PICKLE = 'order.pickle'
 
 
@@ -47,7 +47,7 @@ def get_doc_order():
 
 
 ################################################################################
-# Everything in this bLOCK needs to be run at server startup
+# Everything in this block needs to be run at server startup
 # USER_DICT holds information on users
 USER_DICT = get_user_dict_on_start()
 LOCK = threading.Lock()
@@ -133,8 +133,8 @@ def serve_end_page():
 
 @APP.route('/finalize')
 def finalize():
-    """Serves final statistics for the given user 
-    and erases the user from the database
+    """Serves final statistics for the given user and erases the user from the
+    database
     """
     user_id = flask.request.headers.get('uuid')
     correct = 0
