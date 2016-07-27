@@ -28,7 +28,8 @@ def _get_toptopic(model, dataset):
     for i in range(len(dataset.titles)):
         topic = np.argmax(doc_topic_mixes[i])
         # prevent numpy dependency in toptopic.pickle
-        toptopic[topic].append((float(doc_topic_mixes[i][topic]), dataset.titles[i]))
+        toptopic[topic].append(
+            (float(doc_topic_mixes[i][topic]), str(dataset.titles[i])))
     for top in toptopic:
         top.sort(reverse=True)
     return toptopic
