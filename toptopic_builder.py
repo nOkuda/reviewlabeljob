@@ -27,7 +27,8 @@ def _get_toptopic(model, dataset):
     doc_topic_mixes = simil_builder._get_doc_topic_mixes(model, dataset)
     for i in range(len(dataset.titles)):
         topic = np.argmax(doc_topic_mixes[i])
-        toptopic[topic].append((doc_topic_mixes[i][topic], dataset.titles[i]))
+        # prevent numpy dependency in toptopic.pickle
+        toptopic[topic].append((float(doc_topic_mixes[i][topic]), dataset.titles[i]))
     for top in toptopic:
         top.sort(reverse=True)
     return toptopic
