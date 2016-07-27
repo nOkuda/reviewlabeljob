@@ -178,6 +178,10 @@ def get_uid():
             'start_doc_index': start_doc_index,
             'doc_number': DOC_ORDER[start_doc_index],
             'correct': 0}
+    user_data_dir = os.path.dirname(os.path.realpath(__file__)) + "/userData"
+    file_to_open = user_data_dir+"/"+str(uid)+".data"
+    with open(file_to_open, 'a') as user_file:
+        user_file.write("#JSD\n")
     save_state()
     return flask.jsonify(data)
 

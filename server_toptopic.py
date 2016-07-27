@@ -183,7 +183,8 @@ def get_uid():
     """Sends a UUID to the client"""
     uid = uuid.uuid4()
     data = {'id': uid}
-    different = 1
+    different = RNG.randrange(1,5)
+    print("num different docs",different)
     same = REQUIRED_DOCS-different
     topic = RNG.randrange(NUM_TOPICS)
     while len(TOPTOPIC[topic]) < same:
@@ -197,6 +198,10 @@ def get_uid():
             'same': same,
             'start': start,
             'topic': topic}
+    user_data_dir = os.path.dirname(os.path.realpath(__file__)) + "/userData"
+    file_to_open = user_data_dir+"/"+str(uid)+".data"
+    with open(file_to_open, 'a') as user_file:
+        user_file.write("#TopTopics\n")
     save_state()
     return flask.jsonify(data)
 
