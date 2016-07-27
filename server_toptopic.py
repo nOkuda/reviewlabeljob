@@ -14,7 +14,6 @@ APP = flask.Flask(__name__, static_url_path='')
 REQUIRED_DOCS = 10
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
-TITLES_PICKLE = 'titles.pickle'
 
 
 def get_user_dict_on_start():
@@ -51,8 +50,6 @@ FILEDICT = grab_pickle(FILEDICT_PICKLE)
 # is by topic number; the inner list is sorted by prevalence of topic, high to
 # low
 TOPTOPIC = grab_pickle(TOPTOPIC_PICKLE)
-# TITLES is a numpy array of docnumber
-TITLES = grab_pickle(TITLES_PICKLE)
 NUM_TOPICS = len(TOPTOPIC)
 ################################################################################
 
