@@ -110,10 +110,10 @@ def _run(corpus):
     model = _get_trained_model(dataset)
     doc_topic_mixes = _get_doc_topic_mixes(model, dataset)
     simil = _build_simil_matrix(doc_topic_mixes, dataset.titles)
-    with open('simil.pickle', 'wb') as ofh:
-        pickle.dump(simil, ofh)
-    plt.hist(simil.ravel)
-    plt.savefig('hist.pdf')
+    with open('simil.npy', 'wb') as ofh:
+        # pickle didn't work
+        np.save(ofh, simil)
+    # too big to plot
 
 
 def _get_corpus():
