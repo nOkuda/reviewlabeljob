@@ -23,8 +23,6 @@ EXPGRAD_EPS = 1e-4
 TRAINED = 'trained.pickle'
 TOPIC_MIXTURES = 'topicmix.pickle'
 
-CAND_SIZE = 500
-
 
 def _get_trained_model(dataset):
     """Get trained model"""
@@ -100,7 +98,7 @@ def _build_simil_matrix(doc_topic_mixes, titles):
 
 
 def _run(corpus):
-    """Save out order.pickle"""
+    """Save out simil.npy"""
     with open(corpus, 'rb') as ifh:
         labeleddataset = pickle.load(ifh)
         dataset = ankura.pipeline.Dataset(labeleddataset.docwords,

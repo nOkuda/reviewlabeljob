@@ -11,7 +11,8 @@ import flask
 
 APP = flask.Flask(__name__, static_url_path='')
 # users must label REQUIRED_DOCS documents
-REQUIRED_DOCS = 10
+REQUIRED_DOCS = 20
+SWITCH_COUNT = 4
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
 
@@ -62,31 +63,47 @@ def save_state():
     pickle.dump(last_state, open('last_state.pickle', 'wb'))
 
 
+def get_doc_info(user_id):
+    """Grab document info based on USER_DICT"""
+    doc_number = 0
+    document = ''
+    completed = USER_DICT[user_id]['completed']
+    cumul = USER_DICT[user_id]['cumul']
+    pos = USER_DICT[user_id]['pos']
+    if completed < REQUIRED_DOCS:
+        if completed == cumul[pos]:
+            # move to new topic (context switch)
+            pos += 1
+            topic = RNG.randrange(NUM_TOPICS)
+            different = USER_DICT[user_id]['different']
+            already = USER_DICT[user_id]['already']
+            while len(TOPTOPIC[topic]) < different[pos] and already[topic]:
+                topic = RNG.randrange(NUM_TOPICS)
+            with LOCK:
+                # update USER_DICT
+                USER_DICT[user_id]['pos'] += 1
+                USER_DICT[user_id]['topic'] = topic
+                USER_DICT[user_id]['start'] = \
+                    RNG.randrange(len(TOPTOPIC[topic])-different[pos])
+        number = USER_DICT[user_id]['start'] + completed
+        if pos > 0:
+            # compensate since completed doesn't tell me how many
+            # documents have been labeled for the current topic
+            number -= cumul[pos-1]
+        # doc_number is actually a string identifier for the document;
+        # the naming was chosen since the original corpus we used named
+        # its documents by numbers
+        doc_number = TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
+        document = FILEDICT[doc_number]['text']
+    return doc_number, document, completed
+
+
 @APP.route('/get_doc')
 def get_doc():
     """Gets the next document for whoever is asking"""
     user_id = flask.request.headers.get('uuid')
-    doc_number = 0
-    document = ''
-    with LOCK:
-        if user_id in USER_DICT:
-            completed = USER_DICT[user_id]['completed']
-            same = USER_DICT[user_id]['same']
-            if completed < REQUIRED_DOCS:
-                if completed == same:
-                    # move to new topic (context switch)
-                    topic = RNG.randrange(NUM_TOPICS)
-                    different = USER_DICT[user_id]['different']
-                    while len(TOPTOPIC[topic]) < different:
-                        topic = RNG.randrange(NUM_TOPICS)
-                    USER_DICT[user_id]['topic'] = topic
-                    USER_DICT[user_id]['start'] = \
-                        RNG.randrange(len(TOPTOPIC[topic])-different)
-                number = USER_DICT[user_id]['start'] + completed
-                if completed >= same:
-                    number -= same
-                doc_number = TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
-                document = FILEDICT[doc_number]['text']
+    if user_id in USER_DICT:
+        doc_number, document, _ = get_doc_info(user_id)
     # Return the document
     return flask.jsonify(document=document, doc_number=doc_number)
 
@@ -95,24 +112,11 @@ def get_doc():
 def get_old_doc():
     """Gets the old document for someone if they have one,
         if they refreshed the page for instance"""
-    # Create needed variables
     user_id = flask.request.headers.get('uuid')
-    doc_number = 0
-    completed = 0
-    correct = 0
-    document = ''
     # Get info from the USER_DICT to use to get the old document
     if user_id in USER_DICT:
-        completed = USER_DICT[user_id]['completed']
-        if completed < REQUIRED_DOCS:
-            same = USER_DICT[user_id]['same']
-            number = USER_DICT[user_id]['start'] + completed
-            if completed >= same:
-                number -= same
-            doc_number = TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
-            document = FILEDICT[doc_number]['text']
-            completed = USER_DICT[user_id]['completed']
-            correct = USER_DICT[user_id]['correct']
+        doc_number, document, completed = get_doc_info(user_id)
+        correct = USER_DICT[user_id]['correct']
     # Return the document and doc_number to the client
     return flask.jsonify(
         document=document, doc_number=doc_number, completed=completed,
@@ -178,26 +182,43 @@ def serve_ui_css():
     return flask.send_from_directory('static/stylesheets', 'style.css')
 
 
+def cumsum(numbers):
+    """Return cumulative sum of numbers per list position"""
+    result = []
+    total = 0
+    for num in numbers:
+        total += num
+        result.append(total)
+    return result
+
+
 @APP.route('/uuid')
 def get_uid():
     """Sends a UUID to the client"""
     uid = uuid.uuid4()
     data = {'id': uid}
-    different = RNG.randrange(1,5)
-    print("num different docs",different)
-    same = REQUIRED_DOCS-different
+    # there are SWITCH_COUNT+1 partitions for SWITCH_COUNT context changes
+    different = [1] * (SWITCH_COUNT + 1)
+    for _ in range(REQUIRED_DOCS - (SWITCH_COUNT + 1)):
+        different[random.randrange(SWITCH_COUNT + 1)] += 1
+    print("num different docs", len(different))
+    cumul = cumsum(different)
     topic = RNG.randrange(NUM_TOPICS)
-    while len(TOPTOPIC[topic]) < same:
+    pos = 0
+    while len(TOPTOPIC[topic]) < different[pos]:
         topic = RNG.randrange(NUM_TOPICS)
-    start = RNG.randrange(len(TOPTOPIC[topic])-same)
+    already = {topic: True}
+    start = RNG.randrange(len(TOPTOPIC[topic])-different[pos])
     with LOCK:
         USER_DICT[str(uid)] = {
             'completed': 0,
             'correct': 0,
             'different': different,
-            'same': same,
+            'cumul': cumul,
+            'pos': pos,
             'start': start,
-            'topic': topic}
+            'topic': topic,
+            'already': already}
     user_data_dir = os.path.dirname(os.path.realpath(__file__)) + "/userData"
     file_to_open = user_data_dir+"/"+str(uid)+".data"
     with open(file_to_open, 'a') as user_file:
@@ -221,9 +242,10 @@ def get_rating():
     completed = USER_DICT[user_id]['completed']
     with open(file_to_open, 'a') as user_file:
         docnumber = USER_DICT[user_id]['start'] + completed
-        same = USER_DICT[user_id]['same']
-        if completed > same:
-            docnumber -= same
+        pos = USER_DICT[user_id]['pos']
+        if pos > 0:
+            cumul = USER_DICT[user_id]['cumul']
+            docnumber -= cumul[pos-1]
         user_file.write(
             str(input_json['start_time']) + '\t' + str(input_json['end_time']) +
             '\t' + str(USER_DICT[user_id]['topic']) + '\t' + str(doc_number) +
