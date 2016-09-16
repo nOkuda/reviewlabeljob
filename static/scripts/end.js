@@ -1,3 +1,5 @@
+var money = "Good job.  You qualify for compensation."
+var nomoney = "Unfortunately, you do not qualify for compensation."
 $(document).ready(function() {
   if (!document.hidden) {
     $.ajax({
@@ -5,15 +7,15 @@ $(document).ready(function() {
       url: "/finalize",
       headers: {'uuid': Cookies.get('user_study_uuid')},
       success: function(data) {
-        correct = data['correct'];
+        cma = parseFloat(data['cma']).toFixed(3);
         complete = data['complete'];
-        $("#correct").text(correct)
+        $("#cma").text(cma)
         $("#completed").text(complete)
-        percentage = 0;
-        if (complete > 0) {
-          percentage = 100 * correct / complete
+        if (cma <= 1.0) {
+          $("#finalscore").text(money)
+        } else {
+          $("#finalscore").text(nomoney)
         }
-        $("#finalscore").text(percentage + "%")
       }
     });
     Cookies.remove('user_study_uuid');

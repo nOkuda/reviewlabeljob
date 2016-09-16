@@ -150,7 +150,7 @@ $( document ).ready(function() {
           message += "<p class='col-sm-2'>Correct answer: "+data["label"]+"</p>";
           message += "<div class='col-sm-4'></div>";
           message += "</div>";
-          $("#correct").text(data["correct"]);
+          $("#cma").text(parseFloat(data["cma"]).toFixed(3));
           $("#progress").text(data["completed"]);
           $("#feedback").html(message);
           $("#continueButton").click(function() {
@@ -176,29 +176,12 @@ $( document ).ready(function() {
           location.href = '/end.html';
           return false;
         }
+        $("#cma").text(parseFloat(data["cma"]).toFixed(3));
+        $("#progress").text(data["completed"]);
         $("#document").text(data["document"]);
         docnumber = data["doc_number"];
         d = new Date();
         starttime = d.getTime();
-      }
-    });
-  }
-
-  //Function that gets the user's old document (if they refreshed)
-  var getOldDoc = function() {
-    $.ajax({
-      type: 'GET',
-      url: '/old_doc',
-      headers: {'uuid': Cookies.get('user_study_uuid')},
-      success: function(data) {
-        if (data['doc_number'] === 0) {
-          location.href = '/end.html';
-          return false;
-        }
-        $("#correct").text(data["correct"]);
-        $("#progress").text(data["completed"]);
-        $('#document').text(data['document']);
-        docnumber = data["doc_number"];
       }
     });
   }
@@ -214,6 +197,6 @@ $( document ).ready(function() {
     });
   }
   //If they are not new, get their old document so they can rate it
-  else { getOldDoc(); }
+  else { getDoc(); }
 
 });

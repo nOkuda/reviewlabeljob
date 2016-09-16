@@ -117,27 +117,17 @@ def get_doc_info(user_id):
 
 @APP.route('/get_doc')
 def get_doc():
-    """Gets the next document for whoever is asking"""
+    """Gets the current document for whoever is asking"""
     user_id = flask.request.headers.get('uuid')
-    if user_id in USER_DICT:
-        doc_number, document, _ = get_doc_info(user_id)
-    # Return the document
-    return flask.jsonify(document=document, doc_number=doc_number)
-
-
-@APP.route('/old_doc')
-def get_old_doc():
-    """Gets the old document for someone if they have one,
-        if they refreshed the page for instance"""
-    user_id = flask.request.headers.get('uuid')
-    # Get info from the USER_DICT to use to get the old document
     if user_id in USER_DICT:
         doc_number, document, completed = get_doc_info(user_id)
-        correct = USER_DICT[user_id]['correct']
-    # Return the document and doc_number to the client
+        cma = USER_DICT[user_id]['cma']
+    # Return the document
     return flask.jsonify(
-        document=document, doc_number=doc_number, completed=completed,
-        correct=correct)
+        document=document,
+        doc_number=doc_number,
+        completed=completed,
+        cma=cma)
 
 
 @APP.route('/')
@@ -170,15 +160,15 @@ def finalize():
     and erases the user from the database
     """
     user_id = flask.request.headers.get('uuid')
-    correct = 0
+    cma = float('inf')
     complete = 0
     with LOCK:
         if user_id in USER_DICT:
-            correct = USER_DICT[user_id]['correct']
+            cma = USER_DICT[user_id]['cma']
             complete = USER_DICT[user_id]['completed']
             del USER_DICT[user_id]
             save_state()
-    return flask.jsonify(correct=correct, complete=complete)
+    return flask.jsonify(cma=cma, complete=complete)
 
 
 @APP.route('/scripts/end.js')
@@ -229,7 +219,7 @@ def get_uid():
     with LOCK:
         USER_DICT[str(uid)] = {
             'completed': 0,
-            'correct': 0,
+            'cma': 0.0,
             'different': different,
             'cumul': cumul,
             'pos': pos,
@@ -262,20 +252,22 @@ def get_rating():
             '\t' + str(USER_DICT[user_id]['topic']) + '\t' + str(doc_number) +
             '\t' + str(guess) + '\n')
     prevlabel = FILEDICT[doc_number]['label']
-    correct = USER_DICT[user_id]['correct']
     completed = 0
     with LOCK:
         if user_id in USER_DICT:
-            # update number of user guesses that are correct for feedback
-            if guess == prevlabel:
-                USER_DICT[user_id]['correct'] += 1
-                correct = USER_DICT[user_id]['correct']
+            # update user progress
             USER_DICT[user_id]['completed'] += 1
             completed = USER_DICT[user_id]['completed']
+            # cumulative moving average
+            cma = USER_DICT[user_id]['cma']
+            USER_DICT[user_id]['cma'] += (abs(guess - prevlabel) - cma) / completed
+            cma = USER_DICT[user_id]['cma']
     # Save state (in case the server crashes)
     save_state()
     return flask.jsonify(
-        label=prevlabel, completed=completed, correct=correct)
+        label=prevlabel,
+        completed=completed,
+        cma=cma)
 
 
 if __name__ == '__main__':
