@@ -49,7 +49,7 @@ RNG = random.Random()
 FILEDICT = grab_pickle(FILEDICT_PICKLE)
 # TOPTOPIC is a list of lists of (topic prevalence, docnumber); the outer list
 # is by topic number; the inner list is sorted by prevalence of topic, high to
-# low
+# low; note that docnumber is a string
 TOPTOPIC = grab_pickle(TOPTOPIC_PICKLE)
 NUM_TOPICS = len(TOPTOPIC)
 ################################################################################
@@ -63,39 +63,55 @@ def save_state():
     pickle.dump(last_state, open('last_state.pickle', 'wb'))
 
 
-def get_doc_info(user_id):
-    """Grab document info based on USER_DICT"""
-    doc_number = 0
-    document = ''
+def update_topic(user_id):
+    """Force context switch if appropriate"""
     completed = USER_DICT[user_id]['completed']
     cumul = USER_DICT[user_id]['cumul']
     pos = USER_DICT[user_id]['pos']
-    if completed < REQUIRED_DOCS:
-        if completed == cumul[pos]:
-            # move to new topic (context switch)
-            pos += 1
+    if completed < REQUIRED_DOCS and completed == cumul[pos]:
+        # move to new topic (context switch)
+        pos += 1
+        topic = RNG.randrange(NUM_TOPICS)
+        different = USER_DICT[user_id]['different']
+        already = USER_DICT[user_id]['already']
+        while len(TOPTOPIC[topic]) < different[pos] and already[topic]:
             topic = RNG.randrange(NUM_TOPICS)
-            different = USER_DICT[user_id]['different']
-            already = USER_DICT[user_id]['already']
-            while len(TOPTOPIC[topic]) < different[pos] and already[topic]:
-                topic = RNG.randrange(NUM_TOPICS)
-            with LOCK:
-                # update USER_DICT
-                USER_DICT[user_id]['pos'] += 1
-                USER_DICT[user_id]['topic'] = topic
-                USER_DICT[user_id]['start'] = \
-                    RNG.randrange(len(TOPTOPIC[topic])-different[pos])
-                USER_DICT[user_id]['already'][topic] = True
-        number = USER_DICT[user_id]['start'] + completed
-        if pos > 0:
-            # compensate since completed doesn't tell me how many
-            # documents have been labeled for the current topic
-            number -= cumul[pos-1]
-        # doc_number is actually a string identifier for the document;
-        # the naming was chosen since the original corpus we used named
-        # its documents by numbers
-        doc_number = TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
-        document = FILEDICT[doc_number]['text']
+        with LOCK:
+            # update USER_DICT
+            USER_DICT[user_id]['pos'] += 1
+            USER_DICT[user_id]['topic'] = topic
+            USER_DICT[user_id]['start'] = \
+                RNG.randrange(len(TOPTOPIC[topic])-different[pos])
+            USER_DICT[user_id]['already'][topic] = True
+
+
+def get_doc_number(user_id):
+    """Get document number for user
+
+    Note that the returned value is actually a string identifier for the
+    document; the naming was chosen since the original corpus we used named its
+    documents by numbers
+    """
+    completed = USER_DICT[user_id]['completed']
+    number = USER_DICT[user_id]['start'] + completed
+    cumul = USER_DICT[user_id]['cumul']
+    pos = USER_DICT[user_id]['pos']
+    if pos > 0:
+        # compensate since completed doesn't tell me how many
+        # documents have been labeled for the current topic
+        number -= cumul[pos-1]
+    return TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
+
+
+def get_doc_info(user_id):
+    """Grab document info based on USER_DICT"""
+    completed = USER_DICT[user_id]['completed']
+    if completed >= REQUIRED_DOCS:
+        return 0, '', completed
+    update_topic(user_id)
+    doc_number = get_doc_number(user_id)
+    document = FILEDICT[doc_number]['text']
+    completed = USER_DICT[user_id]['completed']
     return doc_number, document, completed
 
 
@@ -240,13 +256,7 @@ def get_rating():
     if not os.path.exists(user_data_dir):
         os.makedirs(user_data_dir)
     file_to_open = user_data_dir+"/"+user_id+".data"
-    completed = USER_DICT[user_id]['completed']
     with open(file_to_open, 'a') as user_file:
-        docnumber = USER_DICT[user_id]['start'] + completed
-        pos = USER_DICT[user_id]['pos']
-        if pos > 0:
-            cumul = USER_DICT[user_id]['cumul']
-            docnumber -= cumul[pos-1]
         user_file.write(
             str(input_json['start_time']) + '\t' + str(input_json['end_time']) +
             '\t' + str(USER_DICT[user_id]['topic']) + '\t' + str(doc_number) +
