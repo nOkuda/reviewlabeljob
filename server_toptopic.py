@@ -85,6 +85,7 @@ def get_doc_info(user_id):
                 USER_DICT[user_id]['topic'] = topic
                 USER_DICT[user_id]['start'] = \
                     RNG.randrange(len(TOPTOPIC[topic])-different[pos])
+                USER_DICT[user_id]['already'][topic] = True
         number = USER_DICT[user_id]['start'] + completed
         if pos > 0:
             # compensate since completed doesn't tell me how many
