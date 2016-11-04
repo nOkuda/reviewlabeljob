@@ -11,7 +11,7 @@ import flask
 
 APP = flask.Flask(__name__, static_url_path='')
 # users must label REQUIRED_DOCS documents
-REQUIRED_DOCS = 20
+REQUIRED_DOCS = 80
 SWITCH_COUNT = 4
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
@@ -78,11 +78,11 @@ def update_topic(user_id):
             topic = RNG.randrange(NUM_TOPICS)
         with LOCK:
             # update USER_DICT
-            USER_DICT[user_id]['pos'] += 1
+            cur = RNG.randrange(len(TOPTOPIC[topic]))
+            USER_DICT[user_id]['pos'] = pos
+            USER_DICT[user_id]['cur'] = cur
             USER_DICT[user_id]['topic'] = topic
-            USER_DICT[user_id]['start'] = \
-                RNG.randrange(len(TOPTOPIC[topic])-different[pos])
-            USER_DICT[user_id]['already'][topic] = True
+            USER_DICT[user_id]['already'][topic] = {cur: True}
 
 
 def get_doc_number(user_id):
@@ -92,27 +92,21 @@ def get_doc_number(user_id):
     document; the naming was chosen since the original corpus we used named its
     documents by numbers
     """
-    completed = USER_DICT[user_id]['completed']
-    number = USER_DICT[user_id]['start'] + completed
-    cumul = USER_DICT[user_id]['cumul']
-    pos = USER_DICT[user_id]['pos']
-    if pos > 0:
-        # compensate since completed doesn't tell me how many
-        # documents have been labeled for the current topic
-        number -= cumul[pos-1]
-    return TOPTOPIC[USER_DICT[user_id]['topic']][number][1]
+    return TOPTOPIC[USER_DICT[user_id]['topic']][USER_DICT[user_id]['cur']][1]
 
 
 def get_doc_info(user_id):
     """Grab document info based on USER_DICT"""
     completed = USER_DICT[user_id]['completed']
+    correct = USER_DICT[user_id]['correct']
     if completed >= REQUIRED_DOCS:
-        return 0, '', completed
+        return 0, '', completed, correct
     update_topic(user_id)
     doc_number = get_doc_number(user_id)
     document = FILEDICT[doc_number]['text']
     completed = USER_DICT[user_id]['completed']
-    return doc_number, document, completed
+    correct = USER_DICT[user_id]['correct']
+    return doc_number, document, completed, correct
 
 
 @APP.route('/get_doc')
@@ -120,13 +114,17 @@ def get_doc():
     """Gets the current document for whoever is asking"""
     user_id = flask.request.headers.get('uuid')
     if user_id in USER_DICT:
-        doc_number, document, completed = get_doc_info(user_id)
+        doc_number, document, completed, correct = get_doc_info(user_id)
         cma = USER_DICT[user_id]['cma']
+    print(doc_number, len(document), completed, correct)
+    print(document)
+    print(cma)
     # Return the document
     return flask.jsonify(
         document=document,
         doc_number=doc_number,
         completed=completed,
+        correct=correct,
         cma=cma)
 
 
@@ -161,14 +159,16 @@ def finalize():
     """
     user_id = flask.request.headers.get('uuid')
     cma = float('inf')
-    complete = 0
+    correct = 0
+    completed = -1
     with LOCK:
         if user_id in USER_DICT:
             cma = USER_DICT[user_id]['cma']
-            complete = USER_DICT[user_id]['completed']
+            completed = USER_DICT[user_id]['completed']
+            correct = USER_DICT[user_id]['correct']
             del USER_DICT[user_id]
             save_state()
-    return flask.jsonify(cma=cma, complete=complete)
+    return flask.jsonify(cma=cma, completed=completed, correct=correct)
 
 
 @APP.route('/scripts/end.js')
@@ -205,25 +205,23 @@ def get_uid():
     uid = uuid.uuid4()
     data = {'id': uid}
     # there are SWITCH_COUNT+1 partitions for SWITCH_COUNT context changes
-    different = [1] * (SWITCH_COUNT + 1)
-    for _ in range(REQUIRED_DOCS - (SWITCH_COUNT + 1)):
-        different[random.randrange(SWITCH_COUNT + 1)] += 1
-    print("num different docs", len(different))
+    different = [round(REQUIRED_DOCS / (SWITCH_COUNT + 1))] * (SWITCH_COUNT + 1)
     cumul = cumsum(different)
     topic = RNG.randrange(NUM_TOPICS)
     pos = 0
     while len(TOPTOPIC[topic]) < different[pos]:
         topic = RNG.randrange(NUM_TOPICS)
-    already = {topic: True}
-    start = RNG.randrange(len(TOPTOPIC[topic])-different[pos])
+    cur = RNG.randrange(len(TOPTOPIC[topic]))
+    already = {topic: {cur: True}}
     with LOCK:
         USER_DICT[str(uid)] = {
             'completed': 0,
+            'correct': 0,
             'cma': 0.0,
+            'cur': cur,
             'different': different,
             'cumul': cumul,
             'pos': pos,
-            'start': start,
             'topic': topic,
             'already': already}
     user_data_dir = os.path.dirname(os.path.realpath(__file__)) + "/userData"
@@ -241,6 +239,7 @@ def get_rating():
     input_json = flask.request.get_json(force=True)
     user_data_dir = os.path.dirname(os.path.realpath(__file__)) + "/userData"
     user_id = input_json['uid']
+    topic = USER_DICT[user_id]['topic']
     doc_number = input_json['doc_number']
     guess = input_json['rating']
     if not os.path.exists(user_data_dir):
@@ -249,7 +248,7 @@ def get_rating():
     with open(file_to_open, 'a') as user_file:
         user_file.write(
             str(input_json['start_time']) + '\t' + str(input_json['end_time']) +
-            '\t' + str(USER_DICT[user_id]['topic']) + '\t' + str(doc_number) +
+            '\t' + str(topic) + '\t' + str(doc_number) +
             '\t' + str(guess) + '\n')
     prevlabel = FILEDICT[doc_number]['label']
     completed = 0
@@ -258,15 +257,26 @@ def get_rating():
             # update user progress
             USER_DICT[user_id]['completed'] += 1
             completed = USER_DICT[user_id]['completed']
+            cur = RNG.randrange(len(TOPTOPIC[topic]))
+            already = USER_DICT[user_id]['already']
+            while cur in already[topic]:
+                cur = RNG.randrange(len(TOPTOPIC[topic]))
+            already = USER_DICT[user_id]['already'][topic][cur] = True
+            USER_DICT[user_id]['cur'] = cur
             # cumulative moving average
+            diff = abs(guess - prevlabel)
             cma = USER_DICT[user_id]['cma']
-            USER_DICT[user_id]['cma'] += (abs(guess - prevlabel) - cma) / completed
+            USER_DICT[user_id]['cma'] += (diff - cma) / completed
             cma = USER_DICT[user_id]['cma']
+            if diff == 0:
+                USER_DICT[user_id]['correct'] += 1
     # Save state (in case the server crashes)
+    correct = USER_DICT[user_id]['correct']
     save_state()
     return flask.jsonify(
         label=prevlabel,
         completed=completed,
+        correct=correct,
         cma=cma)
 
 

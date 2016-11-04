@@ -112,7 +112,8 @@ $( document ).ready(function() {
   var docnumber;
   var d = new Date();
   var starttime = d.getTime();
-  var alreadyguessed = false
+  var alreadyguessed = false;
+  var percentage;
 
   //Send data when a star rating is given and then show feedback
   $('#stars').on('starrr:change', function(e, value){
@@ -152,6 +153,8 @@ $( document ).ready(function() {
           message += "</div>";
           $("#cma").text(parseFloat(data["cma"]).toFixed(3));
           $("#progress").text(data["completed"]);
+          percentage = Math.floor((parseFloat(data["correct"])/parseFloat(data["completed"]))*100);
+          $("#perc").text(percentage.toFixed(1) + "%");
           $("#feedback").html(message);
           $("#continueButton").click(function() {
             alreadyguessed = false
@@ -178,6 +181,8 @@ $( document ).ready(function() {
         }
         $("#cma").text(parseFloat(data["cma"]).toFixed(3));
         $("#progress").text(data["completed"]);
+        percentage = Math.floor((parseFloat(data["correct"])/parseFloat(data["completed"]))*100);
+        $("#perc").text(percentage.toFixed(1) + "%");
         $("#document").text(data["document"]);
         docnumber = data["doc_number"];
         d = new Date();
