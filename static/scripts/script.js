@@ -153,7 +153,12 @@ $( document ).ready(function() {
           message += "</div>";
           $("#cma").text(parseFloat(data["cma"]).toFixed(3));
           $("#progress").text(data["completed"]);
-          percentage = Math.floor((parseFloat(data["correct"])/parseFloat(data["completed"]))*100);
+          if (parseFloat(data["completed"]) !== 0) {
+            percentage = (parseFloat(data["correct"])/parseFloat(data["completed"]))*100;
+          }
+          else {
+            percentage = 0;
+          }
           $("#perc").text(percentage.toFixed(1) + "%");
           $("#feedback").html(message);
           $("#continueButton").click(function() {
@@ -181,7 +186,12 @@ $( document ).ready(function() {
         }
         $("#cma").text(parseFloat(data["cma"]).toFixed(3));
         $("#progress").text(data["completed"]);
-        percentage = Math.floor((parseFloat(data["correct"])/parseFloat(data["completed"]))*100);
+        if (parseFloat(data["completed"]) !== 0) {
+          percentage = (parseFloat(data["correct"])/parseFloat(data["completed"]))*100;
+        }
+        else {
+          percentage = 0;
+        }
         $("#perc").text(percentage.toFixed(1) + "%");
         $("#document").text(data["document"]);
         docnumber = data["doc_number"];

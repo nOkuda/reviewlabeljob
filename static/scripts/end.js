@@ -8,7 +8,7 @@ $(document).ready(function() {
         var cma = parseFloat(data['cma']).toFixed(3);
         $("#completed").text(data['completed']);
         $("#cma").text(cma);
-        var percentage = Math.floor((parseFloat(data['correct'])/parseFloat(data['completed']))*100);
+        var percentage = (parseFloat(data['correct'])/parseFloat(data['completed']))*100;
         $("#finalscore").text(percentage.toFixed(1) + "%")
       }
     });
