@@ -291,6 +291,41 @@ def _docdiv_vs_other(userdata, s_checker, filename, other_eval):
     _plot2d(filename, np.array(xdata), np.array(ydata))
 
 
+def _get_relative_times(userdata):
+    """Calculate relative times by user
+
+    Relative time here means the percentile at which some time spent labeling is
+    for a given user.
+    """
+    result = {}
+    for user in userdata:
+        times = userdata[user][:, 1] - userdata[user][:, 0]
+        sortedtimes = np.sort(times)
+        percentiles = []
+        for time in times:
+            percentiles.append(
+                float(np.searchsorted(sortedtimes, time)) / float(len(times)))
+        result[user] = np.array(percentiles)
+    return result
+
+
+def _switch_vs_not(userdata, relative_times_by_user, filename):
+    """Analyze data and make box plots of relative times"""
+    switch = []
+    notswitch = []
+    for user in userdata:
+        reltimes = relative_times_by_user[user]
+        switch_indices = userdata[user][:-1, 2] == userdata[user][1:, 2]
+        # account for last value, which is not considered a switch
+        switch_indices = np.append(switch_indices, False)
+        switch.append(reltimes[switch_indices])
+        notswitch.append(reltimes[np.logical_not(switch_indices)])
+
+    fig, axis = plt.subplots(1, 1)
+    axis.boxplot([switch, notswitch], labels=['switch', 'not switch'])
+    fig.savefig(filename, bbox_inches='tight')
+
+
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
@@ -343,6 +378,11 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         os.path.join(outdir, 'docdiv_runningtotalerr.pdf'),
         _other_eval_helper(_extract_runningtotalerr(true_labels_by_user)))
     # box plot:  relative time spent on switch, relative time spent not on switch
+    relative_times_by_user = _get_relative_times(userdata)
+    _switch_vs_not(
+        userdata,
+        relative_times_by_user,
+        os.path.join(outdir, 'switch_relativetimes.pdf'))
     # number of docs labeled vs. relative time spent
 
 
