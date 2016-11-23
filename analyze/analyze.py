@@ -326,6 +326,16 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
     fig.savefig(filename, bbox_inches='tight')
 
 
+def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
+    """Analyze data and plot number of documents labeled vs. relative time"""
+    xdata = []
+    ydata = []
+    for user in userdata:
+        xdata.extend(list(range(userdata[user].shape[0])))
+        ydata.extend(relative_times_by_user[user])
+    _plot2d(filename, np.array(xdata), np.array(ydata))
+
+
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
@@ -384,6 +394,10 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         relative_times_by_user,
         os.path.join(outdir, 'switch_relativetimes.pdf'))
     # number of docs labeled vs. relative time spent
+    _numlabeled_vs_reltime(
+        userdata,
+        relative_times_by_user,
+        os.path.join(outdir, 'numlabeled_relativetimes.pdf'))
 
 
 def _run():
