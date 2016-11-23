@@ -12,6 +12,32 @@ import numpy as np
 import GPy
 
 
+#pylint:disable-msg=too-few-public-methods
+class DivergenceChecker():
+    """Class for looking up document divergences"""
+
+    def __init__(self, divergence, titles):
+        """
+
+            * divergence :: 2D numpy matrix of floats
+                DxD, where D is number of documents; should line up in order as
+                given by titles; each cell contains of JS divergence of topic
+                mixtures of the documents compared
+            * titles :: 1D numpy matrix of strings
+                There should be D entries
+        """
+        self.divergence = divergence
+        self.indexfinder = {}
+        for i, title in enumerate(titles):
+            self.indexfinder[title] = i
+
+    def find_div(self, title1, title2):
+        """Get divergence score between title1 and title2"""
+        return self.divergence[
+            self.indexfinder[title1],
+            self.indexfinder[title2]]
+
+
 def _parse_args():
     """Parse commandline arguments"""
     parser = argparse.ArgumentParser(description='Analyze user study data')
@@ -28,8 +54,11 @@ def _parse_args():
         'corpus',
         help='file path to pickle containing corpus information')
     parser.add_argument(
-        'topicdata',
-        help='file path to pickle containing topic information')
+        'divergence',
+        help='file path to pickle containing divergence matrix of documents')
+    parser.add_argument(
+        'titles',
+        help='file path to pickle containing ordered titles')
     return parser.parse_args()
 
 
@@ -85,16 +114,20 @@ def _get_true_labels_by_user(userdata, corpus):
 
 #pylint:disable-msg=no-member,too-many-locals
 def _plot2d(filename, xdata, ydata, **kwargs):
-    """Plot data as scatter with regression"""
+    """Plot data as scatter with regression
+
+    Opacity settings are dealt with in this function, so don't include alpha in
+    kwargs.
+    """
     fig, axis = plt.subplots(1, 1)
-    baseline = axis.scatter(xdata, ydata, **kwargs)
+    baseline = axis.scatter(xdata, ydata, alpha=0.5, **kwargs)
     # regression via Gaussian process
     sortedx = np.sort(xdata)
-    maxdist = np.max(sortedx[1:] - sortedx[:-2])
+    meandist = np.mean(sortedx[1:] - sortedx[:-1])
     # TODO lengthscale needs to be tuned...not sure how to do that yet
     # lengthscale is set to 3*maxdist because points that far away along the x
     # axis seem like they should affect a given point
-    kernel = GPy.kern.RBF(input_dim=1, lengthscale=3*maxdist)
+    kernel = GPy.kern.RBF(input_dim=1, lengthscale=meandist)
     gpx = xdata.reshape((xdata.size, 1))
     gpy = ydata.reshape((ydata.size, 1))
     gpr = GPy.models.GPRegression(gpx, gpy, kernel)
@@ -102,8 +135,27 @@ def _plot2d(filename, xdata, ydata, **kwargs):
     plotx = np.linspace(xdata.min(), xdata.max(), 200)
     plotx = plotx.reshape((plotx.size, 1))
     pred_mean, _ = gpr.predict(plotx)
-    # pred_quants = gpr.predict_quantiles(plotx, quantiles=(25., 75.))
-    axis.plot(plotx, pred_mean, color=baseline.get_facecolors()[0])
+    axis.plot(
+        plotx,
+        pred_mean,
+        color=baseline.get_facecolors()[0],
+        alpha=0.8,
+        linewidth=3)
+    pred_quants = gpr.predict_quantiles(plotx, quantiles=(25., 75.))
+    axis.plot(
+        plotx,
+        pred_quants[0],
+        color=baseline.get_facecolors()[0],
+        alpha=0.8,
+        linestyle='dashed',
+        linewidth=1.5)
+    axis.plot(
+        plotx,
+        pred_quants[1],
+        color=baseline.get_facecolors()[0],
+        alpha=0.8,
+        linestyle='dashed',
+        linewidth=1.5)
     fig.savefig(filename, bbox_inches='tight')
 
 
@@ -118,7 +170,7 @@ def _mean_absolute_error(guesses, true_labels):
 
 
 def _score_eval_helper(scorer):
-    """Returns a function that evaluates score according to scorer"""
+    """Return a function that evaluates score according to scorer"""
     def _inner(guesseses, true_labelses):
         """Return scores"""
         result = []
@@ -133,7 +185,7 @@ def _totaltime_vs_finalscore(
         true_labels_by_user,
         filename,
         score_eval):
-    """Analyzes data to plot total time vs. final score, as per score_eval"""
+    """Analyze data and plot total time vs. final score, as per score_eval"""
     users = sorted(userdata.keys())
     # note that there are 60000 milliseconds per minute
     xdata = np.array(
@@ -146,7 +198,100 @@ def _totaltime_vs_finalscore(
     _plot2d(filename, xdata, ydata)
 
 
-def _analyze_data(userdata, corpus, topicdata, outdir):
+def _doclength_vs_time(userdata, corpus, filename):
+    """Analyze data and plot document length vs. time spent labeling document"""
+    xdata = []
+    ydata = []
+    for user in userdata:
+        docids = userdata[user][:, 3]
+        doclengths = [len(corpus[str(a)]['text'].split()) for a in docids]
+        xdata.extend(doclengths)
+        # 1000 milliseconds per second
+        times = [
+            float(a) / 1000 \
+            for a in (userdata[user][:, 1] - userdata[user][:, 0])]
+        ydata.extend(times)
+    _plot2d(filename, np.array(xdata), np.array(ydata))
+
+
+def _extract_time(_, usermatrix):
+    """Extract time information for all labels except first"""
+    return usermatrix[1:, 1] - usermatrix[1:, 0]
+
+
+def _extract_runningacc(true_labels_by_user):
+    """Return a function that extracts running accuracy data"""
+    def _inner(user, usermatrix):
+        """Extract running accuracy data"""
+        truelabels = true_labels_by_user[user]
+        accuracies = truelabels == usermatrix[:, 4]
+        return [
+            float(np.sum(accuracies[:a])) / float(a + 1) \
+            for a in range(len(accuracies))][1:]
+    return _inner
+
+
+def _extract_runningtotalacc(true_labels_by_user):
+    """Return a function that extracts running total accuracy data"""
+    def _inner(user, usermatrix):
+        """Extract running total accuracy data"""
+        truelabels = true_labels_by_user[user]
+        accuracies = truelabels == usermatrix[:, 4]
+        return [
+            float(np.sum(accuracies[:a])) / float(len(accuracies)) \
+            for a in range(len(accuracies))][1:]
+    return _inner
+
+
+def _extract_runningmeanerr(true_labels_by_user):
+    """Return a function that extracts running mean error data"""
+    def _inner(user, usermatrix):
+        """Extract running mean error data"""
+        truelabels = true_labels_by_user[user]
+        errors = np.abs(truelabels - usermatrix[:, 4])
+        return [
+            float(np.sum(errors[:a])) / float(a + 1) \
+            for a in range(len(errors))][1:]
+    return _inner
+
+
+def _extract_runningtotalerr(true_labels_by_user):
+    """Return a function that extracts running total error data"""
+    def _inner(user, usermatrix):
+        """Extract running total error data"""
+        truelabels = true_labels_by_user[user]
+        errors = np.abs(truelabels - usermatrix[:, 4])
+        result = [errors[0]]
+        for error in errors[1:]:
+            result.append(result[-1] + error)
+        return result[1:]
+    return _inner
+
+
+def _other_eval_helper(extractor):
+    """Return a function that extracts data"""
+    def _inner(user, usermatrix):
+        """Return data"""
+        return extractor(user, usermatrix)
+    return _inner
+
+
+def _docdiv_vs_other(userdata, s_checker, filename, other_eval):
+    """Analyze data and plot document divergence vs. time spent labeling"""
+    xdata = []
+    ydata = []
+    for user in userdata:
+        docids = userdata[user][:, 3]
+        divs = [
+            s_checker.find_div(str(a), str(b)) \
+            for a, b in zip(docids[:-1], docids[1:])]
+        xdata.extend(divs)
+        others = other_eval(user, userdata[user])
+        ydata.extend(others)
+    _plot2d(filename, np.array(xdata), np.array(ydata))
+
+
+def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
     # total time spent vs. final accuracy
@@ -162,8 +307,43 @@ def _analyze_data(userdata, corpus, topicdata, outdir):
         os.path.join(outdir, 'totaltime_finalmae.pdf'),
         _score_eval_helper(_mean_absolute_error))
     # document length vs. time spent
+    _doclength_vs_time(
+        userdata,
+        corpus,
+        os.path.join(outdir, 'doclength_time.pdf'))
     # JS divergence of switch topics vs. time spent
+    s_checker = DivergenceChecker(divergence, titles)
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_time.pdf'),
+        _other_eval_helper(_extract_time))
+    # JS divergence of switch topics vs. running accuracy
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_runningacc.pdf'),
+        _other_eval_helper(_extract_runningacc(true_labels_by_user)))
+    # JS divergence of switch topics vs. running total accuracy
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_runningtotalacc.pdf'),
+        _other_eval_helper(_extract_runningtotalacc(true_labels_by_user)))
+    # JS divergence of switch topics vs. running mean error
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_runningmeanerr.pdf'),
+        _other_eval_helper(_extract_runningmeanerr(true_labels_by_user)))
+    # JS divergence of switch topics vs. running total error
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_runningtotalerr.pdf'),
+        _other_eval_helper(_extract_runningtotalerr(true_labels_by_user)))
     # box plot:  relative time spent on switch, relative time spent not on switch
+    # number of docs labeled vs. relative time spent
 
 
 def _run():
@@ -171,8 +351,9 @@ def _run():
     args = _parse_args()
     userdata = _get_data(args.userdata)
     corpus = grab_pickle(args.corpus)
-    topicdata = grab_pickle(args.topicdata)
-    _analyze_data(userdata, corpus, topicdata, args.o)
+    divergence = np.load(args.divergence)
+    titles = grab_pickle(args.titles)
+    _analyze_data(userdata, corpus, divergence, titles, args.o)
 
 
 if __name__ == '__main__':
