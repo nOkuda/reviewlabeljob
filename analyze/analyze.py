@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
+from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
 
 import GPy
@@ -120,7 +121,7 @@ def _plot2d(filename, xdata, ydata, **kwargs):
     kwargs.
     """
     fig, axis = plt.subplots(1, 1)
-    baseline = axis.scatter(xdata, ydata, alpha=0.5, **kwargs)
+    axis.scatter(xdata, ydata, alpha=0.5, **kwargs)
     # regression via Gaussian process
     sortedx = np.sort(xdata)
     meandist = np.mean(sortedx[1:] - sortedx[:-1])
@@ -135,24 +136,23 @@ def _plot2d(filename, xdata, ydata, **kwargs):
     plotx = np.linspace(xdata.min(), xdata.max(), 200)
     plotx = plotx.reshape((plotx.size, 1))
     pred_mean, _ = gpr.predict(plotx)
-    axis.plot(
+    pred_line = axis.plot(
         plotx,
         pred_mean,
-        color=baseline.get_facecolors()[0],
         alpha=0.8,
-        linewidth=3)
+        linewidth=3)[0]
     pred_quants = gpr.predict_quantiles(plotx, quantiles=(25., 75.))
     axis.plot(
         plotx,
         pred_quants[0],
-        color=baseline.get_facecolors()[0],
+        color=pred_line.get_color(),
         alpha=0.8,
         linestyle='dashed',
         linewidth=1.5)
     axis.plot(
         plotx,
         pred_quants[1],
-        color=baseline.get_facecolors()[0],
+        color=pred_line.get_color(),
         alpha=0.8,
         linestyle='dashed',
         linewidth=1.5)
@@ -216,46 +216,50 @@ def _doclength_vs_time(userdata, corpus, filename):
 
 def _extract_time(_, usermatrix):
     """Extract time information for all labels except first"""
-    return usermatrix[1:, 1] - usermatrix[1:, 0]
+    # there are 1000 milliseconds per second
+    return (usermatrix[1:, 1] - usermatrix[1:, 0]) / 1000
 
 
-def _extract_runningacc(true_labels_by_user):
+def _extract_runningaccdiff(true_labels_by_user):
     """Return a function that extracts running accuracy data"""
     def _inner(user, usermatrix):
         """Extract running accuracy data"""
         truelabels = true_labels_by_user[user]
         accuracies = truelabels == usermatrix[:, 4]
-        return [
+        runningacc = np.array([
             float(np.sum(accuracies[:a])) / float(a + 1) \
-            for a in range(len(accuracies))][1:]
+            for a in range(len(accuracies))])
+        return runningacc[1:] - runningacc[:-1]
     return _inner
 
 
-def _extract_runningtotalacc(true_labels_by_user):
+def _extract_runningtotalaccdiff(true_labels_by_user):
     """Return a function that extracts running total accuracy data"""
     def _inner(user, usermatrix):
         """Extract running total accuracy data"""
         truelabels = true_labels_by_user[user]
         accuracies = truelabels == usermatrix[:, 4]
-        return [
+        runningtotalacc = np.array([
             float(np.sum(accuracies[:a])) / float(len(accuracies)) \
-            for a in range(len(accuracies))][1:]
+            for a in range(len(accuracies))])
+        return runningtotalacc[1:] - runningtotalacc[:-1]
     return _inner
 
 
-def _extract_runningmeanerr(true_labels_by_user):
+def _extract_runningmeanerrdiff(true_labels_by_user):
     """Return a function that extracts running mean error data"""
     def _inner(user, usermatrix):
         """Extract running mean error data"""
         truelabels = true_labels_by_user[user]
         errors = np.abs(truelabels - usermatrix[:, 4])
-        return [
+        runningmeanerr = np.array([
             float(np.sum(errors[:a])) / float(a + 1) \
-            for a in range(len(errors))][1:]
+            for a in range(len(errors))])
+        return runningmeanerr[1:] - runningmeanerr[:-1]
     return _inner
 
 
-def _extract_runningtotalerr(true_labels_by_user):
+def _extract_runningtotalerrdiff(true_labels_by_user):
     """Return a function that extracts running total error data"""
     def _inner(user, usermatrix):
         """Extract running total error data"""
@@ -264,7 +268,8 @@ def _extract_runningtotalerr(true_labels_by_user):
         result = [errors[0]]
         for error in errors[1:]:
             result.append(result[-1] + error)
-        return result[1:]
+        runningtotalerr = np.array(result)
+        return runningtotalerr[1:] - runningtotalerr[:-1]
     return _inner
 
 
@@ -294,18 +299,17 @@ def _docdiv_vs_other(userdata, s_checker, filename, other_eval):
 def _get_relative_times(userdata):
     """Calculate relative times by user
 
-    Relative time here means the percentile at which some time spent labeling is
-    for a given user.
+    Relative time here means the proportion to the max time spent labeling for a
+    given user.
     """
     result = {}
     for user in userdata:
         times = userdata[user][:, 1] - userdata[user][:, 0]
-        sortedtimes = np.sort(times)
-        percentiles = []
+        maxtime = float(np.max(times))
+        portions = []
         for time in times:
-            percentiles.append(
-                float(np.searchsorted(sortedtimes, time)) / float(len(times)))
-        result[user] = np.array(percentiles)
+            portions.append(float(time) / maxtime)
+        result[user] = np.array(portions)
     return result
 
 
@@ -315,11 +319,11 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
     notswitch = []
     for user in userdata:
         reltimes = relative_times_by_user[user]
-        switch_indices = userdata[user][:-1, 2] == userdata[user][1:, 2]
-        # account for last value, which is not considered a switch
-        switch_indices = np.append(switch_indices, False)
-        switch.append(reltimes[switch_indices])
-        notswitch.append(reltimes[np.logical_not(switch_indices)])
+        not_switch_indices = userdata[user][:-1, 2] == userdata[user][1:, 2]
+        # the first item is considered a switch
+        not_switch_indices = np.insert(not_switch_indices, 0, False)
+        notswitch.append(reltimes[not_switch_indices])
+        switch.append(reltimes[np.logical_not(not_switch_indices)])
 
     fig, axis = plt.subplots(1, 1)
     axis.boxplot([switch, notswitch], labels=['switch', 'not switch'])
@@ -328,12 +332,28 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
 
 def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     """Analyze data and plot number of documents labeled vs. relative time"""
-    xdata = []
-    ydata = []
+    bins = []
     for user in userdata:
-        xdata.extend(list(range(userdata[user].shape[0])))
-        ydata.extend(relative_times_by_user[user])
-    _plot2d(filename, np.array(xdata), np.array(ydata))
+        bins.append(relative_times_by_user[user])
+    # every row is now the ith relative time for each user
+    bins = np.array(bins).T
+
+    user = next(iter(userdata.keys()))
+    not_switch_indices = \
+        userdata[user][:-1, 2] == \
+        userdata[user][1:, 2]
+    # the first item is considered a switch
+    not_switch_indices = np.insert(not_switch_indices, 0, False)
+    switch_indices = np.nonzero(np.logical_not(not_switch_indices))[0]
+    print(switch_indices)
+    major_locator = FixedLocator(switch_indices)
+    major_formatter = FixedFormatter([str(i+1) for i in switch_indices])
+
+    fig, axis = plt.subplots(1, 1)
+    axis.boxplot([b for b in bins])
+    axis.xaxis.set_major_locator(major_locator)
+    axis.xaxis.set_major_formatter(major_formatter)
+    fig.savefig(filename, bbox_inches='tight')
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -367,26 +387,26 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     _docdiv_vs_other(
         userdata,
         s_checker,
-        os.path.join(outdir, 'docdiv_runningacc.pdf'),
-        _other_eval_helper(_extract_runningacc(true_labels_by_user)))
+        os.path.join(outdir, 'docdiv_runningaccdiff.pdf'),
+        _other_eval_helper(_extract_runningaccdiff(true_labels_by_user)))
     # JS divergence of switch topics vs. running total accuracy
     _docdiv_vs_other(
         userdata,
         s_checker,
-        os.path.join(outdir, 'docdiv_runningtotalacc.pdf'),
-        _other_eval_helper(_extract_runningtotalacc(true_labels_by_user)))
+        os.path.join(outdir, 'docdiv_runningtotalaccdiff.pdf'),
+        _other_eval_helper(_extract_runningtotalaccdiff(true_labels_by_user)))
     # JS divergence of switch topics vs. running mean error
     _docdiv_vs_other(
         userdata,
         s_checker,
-        os.path.join(outdir, 'docdiv_runningmeanerr.pdf'),
-        _other_eval_helper(_extract_runningmeanerr(true_labels_by_user)))
+        os.path.join(outdir, 'docdiv_runningmeanerrdiff.pdf'),
+        _other_eval_helper(_extract_runningmeanerrdiff(true_labels_by_user)))
     # JS divergence of switch topics vs. running total error
     _docdiv_vs_other(
         userdata,
         s_checker,
-        os.path.join(outdir, 'docdiv_runningtotalerr.pdf'),
-        _other_eval_helper(_extract_runningtotalerr(true_labels_by_user)))
+        os.path.join(outdir, 'docdiv_runningtotalerrdiff.pdf'),
+        _other_eval_helper(_extract_runningtotalerrdiff(true_labels_by_user)))
     # box plot:  relative time spent on switch, relative time spent not on switch
     relative_times_by_user = _get_relative_times(userdata)
     _switch_vs_not(
