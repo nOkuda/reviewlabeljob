@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
+from sklearn.linear_model import LinearRegression
 
 import GPy
 
@@ -345,8 +346,7 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     # the first item is considered a switch
     not_switch_indices = np.insert(not_switch_indices, 0, False)
     switch_indices = np.nonzero(np.logical_not(not_switch_indices))[0]
-    print(switch_indices)
-    major_locator = FixedLocator(switch_indices)
+    major_locator = FixedLocator(switch_indices+1)
     major_formatter = FixedFormatter([str(i+1) for i in switch_indices])
 
     fig, axis = plt.subplots(1, 1)
@@ -356,9 +356,58 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     fig.savefig(filename, bbox_inches='tight')
 
 
+#pylint:disable-msg=invalid-name
+def _docdiv_vs_doclength_reltime_residuals(
+        userdata,
+        s_checker,
+        corpus,
+        relative_times_by_user,
+        filename):
+    """Analyze data and plot document length residuals and document divergence
+    vs. relative time
+
+    Note that the first document's length is not considered because we don't
+    know what its JS divergences is comparative to nothing"""
+    doclengths = []
+    reltimes = []
+    final_doclengths = []
+    final_reltimes = []
+    doc_divs = []
+    for user, data in userdata.items():
+        docids = data[:, 3]
+        curdoclengths = [len(corpus[str(a)]['text'].split()) for a in docids]
+        doclengths.extend(curdoclengths)
+        final_doclengths.extend(curdoclengths[1:])
+        reltimes.extend(relative_times_by_user[user])
+        final_reltimes.extend(relative_times_by_user[user][1:])
+        divs = [
+            s_checker.find_div(str(a), str(b)) \
+            for a, b in zip(docids[:-1], docids[1:])]
+        doc_divs.extend(divs)
+    doclengths = np.array(doclengths).reshape((len(doclengths), 1))
+    reltimes = np.array(reltimes)
+    final_doclengths = np.array(final_doclengths).reshape((
+        len(final_doclengths), 1))
+    final_reltimes = np.array(final_reltimes)
+    doc_divs = np.array(doc_divs)
+
+    doclength_vs_reltime = LinearRegression()
+    doclength_vs_reltime.fit(doclengths, reltimes)
+    predictions = doclength_vs_reltime.predict(final_doclengths)
+    residuals = np.abs(final_reltimes - predictions)
+
+    _plot2d(filename, doc_divs, residuals)
+    fig, axis = plt.subplots(1, 1)
+    axis.scatter(doclengths, reltimes)
+    axis.plot(doclengths, doclength_vs_reltime.predict(doclengths))
+    fig.savefig('regression.pdf', bbox_inches='tight')
+
+
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
+    s_checker = DivergenceChecker(divergence, titles)
+    relative_times_by_user = _get_relative_times(userdata)
     # total time spent vs. final accuracy
     _totaltime_vs_finalscore(
         userdata,
@@ -377,7 +426,6 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         corpus,
         os.path.join(outdir, 'doclength_time.pdf'))
     # JS divergence of switch topics vs. time spent
-    s_checker = DivergenceChecker(divergence, titles)
     _docdiv_vs_other(
         userdata,
         s_checker,
@@ -408,7 +456,6 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         os.path.join(outdir, 'docdiv_runningtotalerrdiff.pdf'),
         _other_eval_helper(_extract_runningtotalerrdiff(true_labels_by_user)))
     # box plot:  relative time spent on switch, relative time spent not on switch
-    relative_times_by_user = _get_relative_times(userdata)
     _switch_vs_not(
         userdata,
         relative_times_by_user,
@@ -418,6 +465,14 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'numlabeled_relativetimes.pdf'))
+    # residual on length of docs and JS divergences of doc vs. relative time
+    # spent
+    _docdiv_vs_doclength_reltime_residuals(
+        userdata,
+        s_checker,
+        corpus,
+        relative_times_by_user,
+        os.path.join(outdir, 'docdiv_doclengthreltimeresiduals.pdf'))
 
 
 def _run():
