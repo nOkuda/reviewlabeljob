@@ -1,4 +1,4 @@
-"""Script to analyze use study data"""
+"""Script to analyze user study data"""
 import argparse
 import os
 import pickle
@@ -314,6 +314,13 @@ def _get_relative_times(userdata):
     return result
 
 
+def _make_boxplot(data, labels, filename):
+    """Plot boxplots"""
+    fig, axis = plt.subplots(1, 1)
+    axis.boxplot(data, labels=labels)
+    fig.savefig(filename, bbox_inches='tight')
+
+
 def _switch_vs_not(userdata, relative_times_by_user, filename):
     """Analyze data and make box plots of relative times"""
     switch = []
@@ -325,10 +332,7 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
         not_switch_indices = np.insert(not_switch_indices, 0, False)
         notswitch.append(reltimes[not_switch_indices])
         switch.append(reltimes[np.logical_not(not_switch_indices)])
-
-    fig, axis = plt.subplots(1, 1)
-    axis.boxplot([switch, notswitch], labels=['switch', 'not switch'])
-    fig.savefig(filename, bbox_inches='tight')
+    _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
 
 
 def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
@@ -356,18 +360,12 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     fig.savefig(filename, bbox_inches='tight')
 
 
-#pylint:disable-msg=invalid-name
-def _docdiv_vs_doclength_reltime_residuals(
+def _multiregression_helper(
         userdata,
         s_checker,
         corpus,
-        relative_times_by_user,
-        filename):
-    """Analyze data and plot document length residuals and document divergence
-    vs. relative time
-
-    Note that the first document's length is not considered because we don't
-    know what its JS divergences is comparative to nothing"""
+        relative_times_by_user):
+    """Get data necessary for multiple regression cases"""
     doclengths = []
     reltimes = []
     final_doclengths = []
@@ -390,6 +388,27 @@ def _docdiv_vs_doclength_reltime_residuals(
         len(final_doclengths), 1))
     final_reltimes = np.array(final_reltimes)
     doc_divs = np.array(doc_divs)
+    return doclengths, reltimes, final_doclengths, final_reltimes, doc_divs
+
+
+#pylint:disable-msg=invalid-name
+def _docdiv_vs_doclength_reltime_residuals(
+        userdata,
+        s_checker,
+        corpus,
+        relative_times_by_user,
+        filename):
+    """Analyze data and plot document length residuals and document divergence
+    vs. relative time
+
+    Note that the first document's length is not considered because we don't
+    know what its JS divergences is comparative to nothing"""
+    doclengths, reltimes, final_doclengths, final_reltimes, doc_divs = \
+        _multiregression_helper(
+            userdata,
+            s_checker,
+            corpus,
+            relative_times_by_user)
 
     doclength_vs_reltime = LinearRegression()
     doclength_vs_reltime.fit(doclengths, reltimes)
@@ -401,6 +420,69 @@ def _docdiv_vs_doclength_reltime_residuals(
     axis.scatter(doclengths, reltimes)
     axis.plot(doclengths, doclength_vs_reltime.predict(doclengths))
     fig.savefig('regression.pdf', bbox_inches='tight')
+
+
+def _doclength_docdiv_vs_reltime(
+        userdata,
+        s_checker,
+        corpus,
+        relative_times_by_user,
+        filename):
+    """Analyze data and plot document length residuals and document divergence
+    vs. relative time
+
+    Note that the first document's length is not considered because we don't
+    know what its JS divergences is comparative to nothing"""
+    _, _, final_doclengths, final_reltimes, doc_divs = \
+        _multiregression_helper(
+            userdata,
+            s_checker,
+            corpus,
+            relative_times_by_user)
+
+    regr = LinearRegression()
+    regr.fit(
+        np.array(
+            [[a, b] for a, b in zip(final_doclengths.ravel(), doc_divs)]),
+        final_reltimes)
+    xcoords = np.linspace(0, np.max(final_doclengths), 100)
+    ycoords = np.linspace(0, np.max(doc_divs), 100)
+    xgrid, ygrid = np.meshgrid(xcoords, ycoords)
+    predictions = []
+    for ycoord in ycoords:
+        predictions.append(
+            regr.predict(
+                np.array(
+                    [
+                        xcoords,
+                        np.array([ycoord] * len(ycoords))]).T))
+    fig, axis = plt.subplots(1, 1)
+    plot = axis.pcolormesh(
+        xgrid,
+        ygrid,
+        np.array(predictions),
+        cmap=plt.cm.Reds,
+        vmin=0.0,
+        vmax=1.0)
+    plt.colorbar(plot)
+    fig.savefig(filename, bbox_inches='tight')
+
+
+def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
+    """Analyze data and make plots of relative times"""
+    firsts = []
+    lasts = []
+    for user, data in userdata.items():
+        reltimes = relative_times_by_user[user]
+        switches = data[:-1, 2] != data[1:, 2]
+        switches = np.insert(switches, 0, True)
+        switch_indices = np.nonzero(switches)[0]
+        for i in range(3):
+            firsts_indices = switch_indices+i
+            firsts.extend(reltimes[firsts_indices])
+            lasts_indices = switch_indices-(i+1)
+            lasts.extend(reltimes[lasts_indices])
+    _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -473,7 +555,19 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         corpus,
         relative_times_by_user,
         os.path.join(outdir, 'docdiv_doclengthreltimeresiduals.pdf'))
-
+    # heatmap of doc length and divergence vs relative time
+    _doclength_docdiv_vs_reltime(
+        userdata,
+        s_checker,
+        corpus,
+        relative_times_by_user,
+        os.path.join(outdir, 'doclengthdiv_reltime.pdf'))
+    # box plot:  relative time spent after switch, relative time spent before
+    # switch
+    _firsts_vs_lasts_reltimes(
+        userdata,
+        relative_times_by_user,
+        os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
 
 def _run():
     """Run analysis"""
