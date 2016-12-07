@@ -330,8 +330,8 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
         not_switch_indices = userdata[user][:-1, 2] == userdata[user][1:, 2]
         # the first item is considered a switch
         not_switch_indices = np.insert(not_switch_indices, 0, False)
-        notswitch.append(reltimes[not_switch_indices])
-        switch.append(reltimes[np.logical_not(not_switch_indices)])
+        notswitch.extend(reltimes[not_switch_indices])
+        switch.extend(reltimes[np.logical_not(not_switch_indices)])
     _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
 
 
@@ -485,6 +485,37 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
     _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
+def _order_vs_reltimes(userdata, relative_times_by_user, filename):
+    """Analyze data and make plots of document number within topic vs. relative
+    times"""
+    max_same = 0
+    for user, data in userdata.items():
+        switches = data[:-1, 2] != data[1:, 2]
+        switches = np.insert(switches, 0, True)
+        switch_indices = np.nonzero(switches)[0]
+        same_counts = switch_indices[1:] - switch_indices[:-1]
+        same_counts = np.append(
+            same_counts,
+            data[:, 2].shape[0] - switch_indices[-1])
+        for count in same_counts:
+            if count > max_same:
+                max_same = count
+    result = [[] for _ in range(max_same)]
+    for user, data in userdata.items():
+        reltimes = relative_times_by_user[user]
+        switches = data[:-1, 2] != data[1:, 2]
+        switches = np.insert(switches, 0, True)
+        switch_indices = np.nonzero(switches)[0]
+        same_counts = switch_indices[1:] - switch_indices[:-1]
+        same_counts = np.append(
+            same_counts,
+            data[:, 2].shape[0] - switch_indices[-1])
+        for i, switch in enumerate(switch_indices):
+            for j in range(same_counts[i]):
+                result[j].append(reltimes[switch+j])
+    _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
+
+
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
@@ -568,6 +599,12 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
+    # box plot:  relative times per document within group
+    _order_vs_reltimes(
+        userdata,
+        relative_times_by_user,
+        os.path.join(outdir, 'order_reltime.pdf'))
+
 
 def _run():
     """Run analysis"""
