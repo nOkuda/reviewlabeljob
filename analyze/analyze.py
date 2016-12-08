@@ -118,12 +118,15 @@ def _get_true_labels_by_user(userdata, corpus):
 def _plot2d_linear(xdata, ydata, _, axis):
     """Fits a linear regression to the data and plots regression line"""
     linreg = LinearRegression()
-    linreg.fit(xdata.reshape((len(xdata), 1)), ydata.reshape((len(ydata), 1)))
+    regx = xdata.reshape((len(xdata), 1))
+    regy = ydata.reshape((len(ydata), 1))
+    linreg.fit(regx, regy)
+    corr = linreg.score(regx, regy)
     plotx = np.linspace(xdata.min(), xdata.max())
     axis.plot(
         plotx,
         linreg.predict(plotx.reshape(len(plotx), 1)))
-    axis.set_title('Linear Regression')
+    axis.set_title('Linear Regression ($r^2$ = ' + str(corr) + ')')
 
 
 #pylint:disable-msg=no-member
