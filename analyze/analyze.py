@@ -114,16 +114,21 @@ def _get_true_labels_by_user(userdata, corpus):
     return true_labels_by_user
 
 
-#pylint:disable-msg=no-member,too-many-locals
-def _plot2d(filename, xdata, ydata, **kwargs):
-    """Plot data as scatter with regression
+#pylint:disable-msg=no-member
+def _plot2d_linear(xdata, ydata, _, axis):
+    """Fits a linear regression to the data and plots regression line"""
+    linreg = LinearRegression()
+    linreg.fit(xdata.reshape((len(xdata), 1)), ydata.reshape((len(ydata), 1)))
+    plotx = np.linspace(xdata.min(), xdata.max())
+    axis.plot(
+        plotx,
+        linreg.predict(plotx.reshape(len(plotx), 1)))
+    axis.set_title('Linear Regression')
 
-    Opacity settings are dealt with in this function, so don't include alpha in
-    kwargs.
-    """
-    fig, axis = plt.subplots(1, 1)
-    axis.scatter(xdata, ydata, alpha=0.5, **kwargs)
-    # regression via Gaussian process
+
+#pylint:disable-msg=no-member
+def _plot2d_gaussian(xdata, ydata, _, axis):
+    """Fit a Gaussian process to the data and plots the regression"""
     sortedx = np.sort(xdata)
     meandist = np.mean(sortedx[1:] - sortedx[:-1])
     # TODO lengthscale needs to be tuned...not sure how to do that yet
@@ -157,6 +162,18 @@ def _plot2d(filename, xdata, ydata, **kwargs):
         alpha=0.8,
         linestyle='dashed',
         linewidth=1.5)
+    axis.set_title('Gaussian Process')
+
+
+def _plot2d(filename, xdata, ydata, plot_helper):
+    """Plot data as scatter with regression
+
+    Opacity settings are dealt with in this function, so don't include alpha in
+    kwargs.
+    """
+    fig, axis = plt.subplots(1, 1)
+    axis.scatter(xdata, ydata, alpha=0.5)
+    plot_helper(xdata, ydata, fig, axis)
     fig.savefig(filename, bbox_inches='tight')
 
 
@@ -196,7 +213,7 @@ def _totaltime_vs_finalscore(
     ydata = score_eval(
         [userdata[user][:, -1] for user in users],
         [true_labels_by_user[user] for user in users])
-    _plot2d(filename, xdata, ydata)
+    _plot2d(filename, xdata, ydata, _plot2d_linear)
 
 
 def _doclength_vs_time(userdata, corpus, filename):
@@ -212,7 +229,7 @@ def _doclength_vs_time(userdata, corpus, filename):
             float(a) / 1000 \
             for a in (userdata[user][:, 1] - userdata[user][:, 0])]
         ydata.extend(times)
-    _plot2d(filename, np.array(xdata), np.array(ydata))
+    _plot2d(filename, np.array(xdata), np.array(ydata), _plot2d_linear)
 
 
 def _extract_time(_, usermatrix):
@@ -294,7 +311,7 @@ def _docdiv_vs_other(userdata, s_checker, filename, other_eval):
         xdata.extend(divs)
         others = other_eval(user, userdata[user])
         ydata.extend(others)
-    _plot2d(filename, np.array(xdata), np.array(ydata))
+    _plot2d(filename, np.array(xdata), np.array(ydata), _plot2d_linear)
 
 
 def _get_relative_times(userdata):
@@ -415,13 +432,10 @@ def _docdiv_vs_doclength_reltime_residuals(
     predictions = doclength_vs_reltime.predict(final_doclengths)
     residuals = np.abs(final_reltimes - predictions)
 
-    _plot2d(filename, doc_divs, residuals)
-    fig, axis = plt.subplots(1, 1)
-    axis.scatter(doclengths, reltimes)
-    axis.plot(doclengths, doclength_vs_reltime.predict(doclengths))
-    fig.savefig('regression.pdf', bbox_inches='tight')
+    _plot2d(filename, doc_divs, residuals, _plot2d_linear)
 
 
+#pylint:disable-msg=too-many-locals
 def _doclength_docdiv_vs_reltime(
         userdata,
         s_checker,
