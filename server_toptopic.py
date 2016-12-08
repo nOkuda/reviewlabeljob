@@ -74,7 +74,7 @@ def update_topic(user_id):
         topic = RNG.randrange(NUM_TOPICS)
         different = USER_DICT[user_id]['different']
         already = USER_DICT[user_id]['already']
-        while len(TOPTOPIC[topic]) < different[pos] and already[topic]:
+        while len(TOPTOPIC[topic]) < different[pos] or topic in already:
             topic = RNG.randrange(NUM_TOPICS)
         with LOCK:
             # update USER_DICT
@@ -261,7 +261,7 @@ def get_rating():
             already = USER_DICT[user_id]['already']
             while cur in already[topic]:
                 cur = RNG.randrange(len(TOPTOPIC[topic]))
-            already = USER_DICT[user_id]['already'][topic][cur] = True
+            USER_DICT[user_id]['already'][topic][cur] = True
             USER_DICT[user_id]['cur'] = cur
             # cumulative moving average
             diff = abs(guess - prevlabel)
