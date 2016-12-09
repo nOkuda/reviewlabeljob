@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
+from scipy.stats import ks_2samp
 from sklearn.linear_model import LinearRegression
 
 import GPy
@@ -178,6 +179,7 @@ def _plot2d(filename, xdata, ydata, plot_helper):
     axis.scatter(xdata, ydata, alpha=0.5)
     plot_helper(xdata, ydata, fig, axis)
     fig.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
 def _accuracy(guesses, true_labels):
@@ -239,6 +241,12 @@ def _extract_time(_, usermatrix):
     """Extract time information for all labels except first"""
     # there are 1000 milliseconds per second
     return (usermatrix[1:, 1] - usermatrix[1:, 0]) / 1000
+
+
+def _extract_reltime(_, usermatrix):
+    """Extract relative time information for all labels except first"""
+    times = usermatrix[1:, 1] - usermatrix[1:, 0]
+    return times / times.max()
 
 
 def _extract_runningaccdiff(true_labels_by_user):
@@ -338,10 +346,29 @@ def _make_boxplot(data, labels, filename):
     """Plot boxplots"""
     fig, axis = plt.subplots(1, 1)
     axis.boxplot(data, labels=labels)
+    if len(data) == 2:
+        test_stat, pval = ks_2samp(data[0], data[1])
+        axis.set_title(
+            'KS: test_stat=' + str(test_stat) + '; pval=' + str(pval))
     fig.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
-def _switch_vs_not(userdata, relative_times_by_user, filename):
+def _switch_vs_not(userdata, filename):
+    """Analyze data and make box plots of relative times"""
+    switch = []
+    notswitch = []
+    for user in userdata:
+        times = (userdata[user][:, 1] - userdata[user][:, 0]) / 1000
+        not_switch_indices = userdata[user][:-1, 2] == userdata[user][1:, 2]
+        # the first item is considered a switch
+        not_switch_indices = np.insert(not_switch_indices, 0, False)
+        notswitch.extend(times[not_switch_indices])
+        switch.extend(times[np.logical_not(not_switch_indices)])
+    _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
+
+
+def _switch_vs_not_relative(userdata, relative_times_by_user, filename):
     """Analyze data and make box plots of relative times"""
     switch = []
     notswitch = []
@@ -353,6 +380,32 @@ def _switch_vs_not(userdata, relative_times_by_user, filename):
         notswitch.extend(reltimes[not_switch_indices])
         switch.extend(reltimes[np.logical_not(not_switch_indices)])
     _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
+
+
+def _numlabeled_vs_time(userdata, filename):
+    """Analyze data and plot number of documents labeled vs. time"""
+    bins = []
+    for _, data in userdata.items():
+        bins.append((data[:, 1] - data[:, 0]) / 1000)
+    # every row is now the ith time for each user
+    bins = np.array(bins).T
+
+    user = next(iter(userdata.keys()))
+    not_switch_indices = \
+        userdata[user][:-1, 2] == \
+        userdata[user][1:, 2]
+    # the first item is considered a switch
+    not_switch_indices = np.insert(not_switch_indices, 0, False)
+    switch_indices = np.nonzero(np.logical_not(not_switch_indices))[0]
+    major_locator = FixedLocator(switch_indices+1)
+    major_formatter = FixedFormatter([str(i+1) for i in switch_indices])
+
+    fig, axis = plt.subplots(1, 1)
+    axis.boxplot([b for b in bins])
+    axis.xaxis.set_major_locator(major_locator)
+    axis.xaxis.set_major_formatter(major_formatter)
+    fig.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
 def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
@@ -378,6 +431,7 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     axis.xaxis.set_major_locator(major_locator)
     axis.xaxis.set_major_formatter(major_formatter)
     fig.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
 def _multiregression_helper(
@@ -464,7 +518,6 @@ def _doclength_docdiv_vs_reltime(
         final_reltimes)
     xcoords = np.linspace(0, np.max(final_doclengths), 100)
     ycoords = np.linspace(0, np.max(doc_divs), 100)
-    xgrid, ygrid = np.meshgrid(xcoords, ycoords)
     predictions = []
     for ycoord in ycoords:
         predictions.append(
@@ -474,15 +527,15 @@ def _doclength_docdiv_vs_reltime(
                         xcoords,
                         np.array([ycoord] * len(ycoords))]).T))
     fig, axis = plt.subplots(1, 1)
-    plot = axis.pcolormesh(
-        xgrid,
-        ygrid,
+    plot = axis.matshow(
         np.array(predictions),
         cmap=plt.cm.Reds,
         vmin=0.0,
         vmax=1.0)
+    axis.grid()
     plt.colorbar(plot)
     fig.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
 def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
@@ -502,9 +555,91 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
     _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
+def _compare_kstest(sampleses, filename):
+    """Plots Kolmogorov-Smirnov test results
+
+    Assuming that filename ends with ".pdf"
+    """
+    test_stats = []
+    test_pvals = []
+    for samples in sampleses[:16]:
+        test_stats.append([])
+        test_pvals.append([])
+        for other in sampleses[:16]:
+            stat, pval = ks_2samp(samples, other)
+            test_stats[-1].append(stat)
+            test_pvals[-1].append(pval)
+    test_pvals = np.array(test_pvals)
+    np.savetxt('test_pvals.txt', test_pvals)
+    fig, axis = plt.subplots(1, 1)
+    plot = axis.matshow(
+        test_pvals,
+        cmap=plt.cm.Reds)
+    axis.grid()
+    plt.colorbar(plot)
+    fig.savefig(filename[:-4]+'_pvals.pdf', bbox_inches='tight')
+    plt.close()
+
+    sig_pvals = test_pvals < 0.05
+    fig, axis = plt.subplots(1, 1)
+    plot = axis.matshow(
+        sig_pvals,
+        cmap=plt.cm.Reds)
+    axis.grid()
+    plt.colorbar(plot)
+    fig.savefig(filename[:-4]+'_sigpvals.pdf', bbox_inches='tight')
+    plt.close()
+
+    fig, axis = plt.subplots(1, 1)
+    plot = axis.matshow(
+        np.array(test_stats),
+        cmap=plt.cm.Reds)
+    axis.grid()
+    plt.colorbar(plot)
+    fig.savefig(filename[:-4]+'_stats.pdf', bbox_inches='tight')
+    plt.close()
+
+
+def _order_vs_times(userdata, filename):
+    """Analyze data and make plots of document number within topic vs. times
+
+    Also plot Kolmogorov-Smirnov test of first 16 in order against each other
+    """
+    max_same = 0
+    for _, data in userdata.items():
+        switches = data[:-1, 2] != data[1:, 2]
+        switches = np.insert(switches, 0, True)
+        switch_indices = np.nonzero(switches)[0]
+        same_counts = switch_indices[1:] - switch_indices[:-1]
+        same_counts = np.append(
+            same_counts,
+            data[:, 2].shape[0] - switch_indices[-1])
+        for count in same_counts:
+            if count > max_same:
+                max_same = count
+    result = [[] for _ in range(max_same)]
+    for _, data in userdata.items():
+        times = (data[:, 1] - data[:, 0]) / 1000
+        switches = data[:-1, 2] != data[1:, 2]
+        switches = np.insert(switches, 0, True)
+        switch_indices = np.nonzero(switches)[0]
+        same_counts = switch_indices[1:] - switch_indices[:-1]
+        same_counts = np.append(
+            same_counts,
+            data[:, 2].shape[0] - switch_indices[-1])
+        for i, switch in enumerate(switch_indices):
+            for j in range(same_counts[i]):
+                result[j].append(times[switch+j])
+    _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
+    _compare_kstest(result, filename)
+
+
 def _order_vs_reltimes(userdata, relative_times_by_user, filename):
     """Analyze data and make plots of document number within topic vs. relative
-    times"""
+    times
+
+    Also plot Kolmogorov-Smirnov test of first 16 in order against each other
+    """
     max_same = 0
     for user, data in userdata.items():
         switches = data[:-1, 2] != data[1:, 2]
@@ -531,6 +666,7 @@ def _order_vs_reltimes(userdata, relative_times_by_user, filename):
             for j in range(same_counts[i]):
                 result[j].append(reltimes[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
+    _compare_kstest(result, filename)
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -561,6 +697,12 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         s_checker,
         os.path.join(outdir, 'docdiv_time.pdf'),
         _other_eval_helper(_extract_time))
+    # JS divergence of switch topics vs. relative time spent
+    _docdiv_vs_other(
+        userdata,
+        s_checker,
+        os.path.join(outdir, 'docdiv_reltime.pdf'),
+        _other_eval_helper(_extract_reltime))
     # JS divergence of switch topics vs. running accuracy
     _docdiv_vs_other(
         userdata,
@@ -586,15 +728,23 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         os.path.join(outdir, 'docdiv_runningtotalerrdiff.pdf'),
         _other_eval_helper(_extract_runningtotalerrdiff(true_labels_by_user)))
     # box plot:  relative time spent on switch, relative time spent not on switch
-    _switch_vs_not(
+    _switch_vs_not_relative(
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'switch_relativetimes.pdf'))
+    # box plot:  time spent on switch/not on switch
+    _switch_vs_not(
+        userdata,
+        os.path.join(outdir, 'switch_times.pdf'))
     # number of docs labeled vs. relative time spent
     _numlabeled_vs_reltime(
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'numlabeled_relativetimes.pdf'))
+    # number of docs labeled vs. time spent
+    _numlabeled_vs_time(
+        userdata,
+        os.path.join(outdir, 'numlabeled_times.pdf'))
     # residual on length of docs and JS divergences of doc vs. relative time
     # spent
     _docdiv_vs_doclength_reltime_residuals(
@@ -621,6 +771,10 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'order_reltime.pdf'))
+    # box plot:  times per document within group
+    _order_vs_times(
+        userdata,
+        os.path.join(outdir, 'order_time.pdf'))
 
 
 def _run():
