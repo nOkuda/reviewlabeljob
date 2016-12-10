@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
-from scipy.stats import ks_2samp
+from scipy.stats import kstest, ks_2samp, gamma
 from sklearn.linear_model import LinearRegression
 
 import GPy
@@ -600,6 +600,88 @@ def _compare_kstest(sampleses, filename):
     plt.close()
 
 
+def _pad_num(i):
+    """Pad number to make two characters long
+
+    Assuming that i is an integer never greater than 99
+    """
+    if i < 10:
+        return '0' + str(i)
+    return str(i)
+
+
+def _fit_gamma(sampleses, filename):
+    """Fits a gamma distribution to the first 16 samples and plots the results
+
+    Assuming that filename ends with ".pdf"
+    """
+    for i, samples in enumerate(sampleses[:16]):
+        sample_mean = np.mean(samples)
+        sample_var = np.var(samples)
+        sample_median = np.median(samples)
+        shape, loc, scale = gamma.fit(samples)
+        stat, pval = kstest(
+            samples,
+            'gamma',
+            args=(shape, loc, scale))
+        fig, axis = plt.subplots(1, 1)
+        axis.hist(samples, normed=True)
+        if i == 15:
+            fig.savefig('last.pdf')
+        plotx = np.linspace(np.min(samples), np.max(samples))
+        axis.plot(
+            plotx,
+            gamma.pdf(plotx, shape, loc=loc, scale=scale),
+            linewidth=3)
+        axis.set_title('shape='+str(shape)+'; loc='+str(loc) + \
+            '; scale='+str(scale)+'\n' + \
+            'stat='+str(stat)+'; pval='+str(pval)+'\n' + \
+            'mean='+str(shape*scale)+'; var='+str(shape*scale*scale)+'\n' + \
+            's_mean='+str(sample_mean)+'; s_var='+str(sample_var)+'\n' + \
+            's_median='+str(sample_median))
+        fig.savefig(
+            filename[:-4]+'_fit_'+_pad_num(i+1)+'.pdf',
+            bbox_inches='tight')
+        plt.close()
+
+
+def _plot_stats(sampleses, filename):
+    """Plot sample means, medians, and variances for the first 16 samples
+
+    Assuming that filename ends with ".pdf"
+    Also spits out text file with data
+    """
+    means = []
+    medians = []
+    variances = []
+    for samples in sampleses[:16]:
+        means.append(np.mean(samples))
+        medians.append(np.median(samples))
+        variances.append(np.var(samples))
+    ind = np.arange(16)
+
+    fig, axis = plt.subplots(1, 1)
+    axis.bar(ind, means, alpha=0.9)
+    fig.savefig(filename[:-4]+'_means.pdf', bbox_inches='tight')
+    plt.close()
+
+    fig, axis = plt.subplots(1, 1)
+    axis.bar(ind, medians, alpha=0.9)
+    fig.savefig(filename[:-4]+'_medians.pdf', bbox_inches='tight')
+    plt.close()
+
+    fig, axis = plt.subplots(1, 1)
+    ind = np.arange(16)
+    axis.bar(ind, variances, alpha=0.9)
+    fig.savefig(filename[:-4]+'_vars.pdf', bbox_inches='tight')
+    plt.close()
+
+    with open(filename[:-4]+'_stats.txt', 'w') as ofh:
+        ofh.write('# mean median variance')
+        for men, med, vari in zip(means, medians, variances):
+            ofh.write(str(men)+' '+str(med)+' '+str(vari)+'\n')
+
+
 def _order_vs_times(userdata, filename):
     """Analyze data and make plots of document number within topic vs. times
 
@@ -632,6 +714,8 @@ def _order_vs_times(userdata, filename):
                 result[j].append(times[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
     _compare_kstest(result, filename)
+    _fit_gamma(result, filename)
+    _plot_stats(result, filename)
 
 
 def _order_vs_reltimes(userdata, relative_times_by_user, filename):
@@ -667,6 +751,8 @@ def _order_vs_reltimes(userdata, relative_times_by_user, filename):
                 result[j].append(reltimes[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
     _compare_kstest(result, filename)
+    _fit_gamma(result, filename)
+    _plot_stats(result, filename)
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -775,6 +861,7 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     _order_vs_times(
         userdata,
         os.path.join(outdir, 'order_time.pdf'))
+    # TODO bar plot:  change in time as number of topics labeled increases
 
 
 def _run():
