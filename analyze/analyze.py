@@ -555,6 +555,89 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
     _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
+def _plot_table(data, cmap, display_value, filename):
+    """Plot a table
+
+     * data :: 2-D np.array
+        the data to be tabulated
+     * cmap :: matplotlib.colors.Colormap
+        the colormap to use
+     * display_value :: boolean
+        whether to display the value in the cell
+     * filename :: str
+        ouptut file name
+    """
+    # http://stackoverflow.com/questions/10194482/custom-matplotlib-plot-chess-board-like-table-with-colored-cells
+    fig, axis = plt.subplots(1, 1)
+    axis.set_axis_off()
+    table = matplotlib.table.Table(axis, bbox=[0, 0, 1, 1])
+    nrows, ncols = data.shape
+    width, height = 1.0/ncols, 1.0/nrows
+    for (i, j), datum in np.ndenumerate(data):
+        text = ''
+        if display_value:
+            text = str(round(datum, 3))
+        table.add_cell(
+            i,
+            j,
+            width,
+            height,
+            text=text,
+            loc='center',
+            facecolor=cmap(datum))
+        color = '0.1'
+        if datum < 0.05:
+            # easier to see lighter text on darker background; change text color
+            # when statistically significant
+            color = '0.7'
+        cell = table.get_celld()[(i, j)]
+        cell.get_text().set_color(color)
+    for i in range(data.shape[0]):
+        table.add_cell(
+            i,
+            -1,
+            width,
+            height,
+            text=str(i),
+            loc='right',
+            edgecolor='none',
+            facecolor='none')
+    for j in range(data.shape[1]):
+        table.add_cell(
+            -1,
+            j,
+            width,
+            height,
+            text=str(j),
+            loc='center',
+            edgecolor='none',
+            facecolor='none')
+    axis.add_table(table)
+    fig.savefig(filename, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_matrix(data, cmap, colorbar, filename):
+    """Plot a matrix
+
+     * data :: 2-D np.array
+        that data to be matricized
+     * cmap :: matplotlib.colors.Colormap
+        the colormap to use
+     * colorbar :: boolean
+        whether to display color bar
+     * filename :: str
+        output file name
+    """
+    fig, axis = plt.subplots(1, 1)
+    plot = axis.matshow(data, cmap=cmap)
+    if colorbar:
+        plt.colorbar(plot)
+    axis.grid(b=False)
+    fig.savefig(filename, bbox_inches='tight')
+    plt.close()
+
+
 def _compare_kstest(sampleses, filename):
     """Plots Kolmogorov-Smirnov test results
 
@@ -571,33 +654,26 @@ def _compare_kstest(sampleses, filename):
             test_pvals[-1].append(pval)
     test_pvals = np.array(test_pvals)
     np.savetxt('test_pvals.txt', test_pvals)
-    fig, axis = plt.subplots(1, 1)
-    plot = axis.matshow(
-        test_pvals,
-        cmap=plt.cm.Reds)
-    axis.grid()
-    plt.colorbar(plot)
-    fig.savefig(filename[:-4]+'_pvals.pdf', bbox_inches='tight')
-    plt.close()
 
-    sig_pvals = test_pvals < 0.05
-    fig, axis = plt.subplots(1, 1)
-    plot = axis.matshow(
-        sig_pvals,
-        cmap=plt.cm.Reds)
-    axis.grid()
-    plt.colorbar(plot)
-    fig.savefig(filename[:-4]+'_sigpvals.pdf', bbox_inches='tight')
-    plt.close()
+    _plot_table(test_pvals, plt.cm.Reds_r, True, filename[:-4]+'_pvals.pdf')
+    _plot_table(test_pvals, plt.cm.Reds_r, False, filename[:-4]+'_pvals_nonum.pdf')
+    _plot_matrix(test_pvals, plt.cm.Reds_r, True, filename[:-4]+'_pvals_mat.pdf')
 
-    fig, axis = plt.subplots(1, 1)
-    plot = axis.matshow(
-        np.array(test_stats),
-        cmap=plt.cm.Reds)
-    axis.grid()
-    plt.colorbar(plot)
-    fig.savefig(filename[:-4]+'_stats.pdf', bbox_inches='tight')
-    plt.close()
+    sig_pvals = []
+    for row in test_pvals:
+        sig_pvals.append([])
+        for val in row:
+            sig_pvals[-1].append(1.0 if val < 0.05 else 0.0)
+    cmap = matplotlib.colors.ListedColormap(
+        np.array(
+            [
+                list(plt.cm.Reds(0.0)),
+                list(plt.cm.Reds(1.0))]))
+    _plot_table(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals.pdf')
+    _plot_matrix(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals_mat.pdf')
+
+    _plot_table(np.array(test_stats), plt.cm.Reds, True, filename[:-4]+'_stats.pdf')
+    _plot_matrix(np.array(test_stats), plt.cm.Reds, True, filename[:-4]+'_stats_mat.pdf')
 
 
 def _pad_num(i):
@@ -652,21 +728,33 @@ def _plot_stats(sampleses, filename):
     Also spits out text file with data
     """
     means = []
+    std_devs = []
     medians = []
+    first_quartile = []
+    third_quartile = []
     variances = []
     for samples in sampleses[:16]:
         means.append(np.mean(samples))
+        std_devs.append(np.std(samples))
         medians.append(np.median(samples))
+        first_quartile.append(np.percentile(samples, 25))
+        third_quartile.append(np.percentile(samples, 75))
         variances.append(np.var(samples))
     ind = np.arange(16)
+    first_quartile_distance = np.array(medians) - np.array(first_quartile)
+    third_quartile_distance = np.array(third_quartile) - np.array(medians)
 
     fig, axis = plt.subplots(1, 1)
-    axis.bar(ind, means, alpha=0.9)
+    axis.bar(ind, means, alpha=0.9, yerr=std_devs)
     fig.savefig(filename[:-4]+'_means.pdf', bbox_inches='tight')
     plt.close()
 
     fig, axis = plt.subplots(1, 1)
-    axis.bar(ind, medians, alpha=0.9)
+    axis.bar(
+        ind,
+        medians,
+        alpha=0.9,
+        yerr=[first_quartile_distance, third_quartile_distance])
     fig.savefig(filename[:-4]+'_medians.pdf', bbox_inches='tight')
     plt.close()
 
@@ -677,7 +765,7 @@ def _plot_stats(sampleses, filename):
     plt.close()
 
     with open(filename[:-4]+'_stats.txt', 'w') as ofh:
-        ofh.write('# mean median variance')
+        ofh.write('# mean median variance\n')
         for men, med, vari in zip(means, medians, variances):
             ofh.write(str(men)+' '+str(med)+' '+str(vari)+'\n')
 
