@@ -529,7 +529,7 @@ def _doclength_docdiv_vs_reltime(
     fig, axis = plt.subplots(1, 1)
     plot = axis.matshow(
         np.array(predictions),
-        cmap=plt.cm.Reds,
+        cmap=plt.cm.YlGn,
         vmin=0.0,
         vmax=1.0)
     axis.grid()
@@ -585,13 +585,14 @@ def _plot_table(data, cmap, display_value, filename):
             text=text,
             loc='center',
             facecolor=cmap(datum))
-        color = '0.1'
+        color = (0.0, 0.0, 0.0, 0.75)
+        weight = 'normal'
         if datum < 0.05:
-            # easier to see lighter text on darker background; change text color
-            # when statistically significant
-            color = '0.7'
+            color = 'c'
+            weight = 'bold'
         cell = table.get_celld()[(i, j)]
         cell.get_text().set_color(color)
+        cell.get_text().set_weight(weight)
     for i in range(data.shape[0]):
         table.add_cell(
             i,
@@ -655,9 +656,8 @@ def _compare_kstest(sampleses, filename):
     test_pvals = np.array(test_pvals)
     np.savetxt('test_pvals.txt', test_pvals)
 
-    _plot_table(test_pvals, plt.cm.Reds_r, True, filename[:-4]+'_pvals.pdf')
-    _plot_table(test_pvals, plt.cm.Reds_r, False, filename[:-4]+'_pvals_nonum.pdf')
-    _plot_matrix(test_pvals, plt.cm.Reds_r, True, filename[:-4]+'_pvals_mat.pdf')
+    _plot_table(test_pvals, plt.cm.YlGn_r, True, filename[:-4]+'_pvals.pdf')
+    _plot_matrix(test_pvals, plt.cm.YlGn_r, True, filename[:-4]+'_pvals_mat.pdf')
 
     sig_pvals = []
     for row in test_pvals:
@@ -667,13 +667,13 @@ def _compare_kstest(sampleses, filename):
     cmap = matplotlib.colors.ListedColormap(
         np.array(
             [
-                list(plt.cm.Reds(0.0)),
-                list(plt.cm.Reds(1.0))]))
+                list(plt.cm.YlGn(0.0)),
+                list(plt.cm.YlGn(1.0))]))
     _plot_table(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals.pdf')
     _plot_matrix(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals_mat.pdf')
 
-    _plot_table(np.array(test_stats), plt.cm.Reds, True, filename[:-4]+'_stats.pdf')
-    _plot_matrix(np.array(test_stats), plt.cm.Reds, True, filename[:-4]+'_stats_mat.pdf')
+    _plot_table(np.array(test_stats), plt.cm.YlGn, True, filename[:-4]+'_stats.pdf')
+    _plot_matrix(np.array(test_stats), plt.cm.YlGn, True, filename[:-4]+'_stats_mat.pdf')
 
 
 def _pad_num(i):
@@ -723,7 +723,7 @@ def _fit_gamma(sampleses, filename):
 
 def _plot_stats(sampleses, filename):
     """Plot sample means, medians, and variances for the first 16 samples
-
+s
     Assuming that filename ends with ".pdf"
     Also spits out text file with data
     """
@@ -802,7 +802,6 @@ def _order_vs_times(userdata, filename):
                 result[j].append(times[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
     _compare_kstest(result, filename)
-    _fit_gamma(result, filename)
     _plot_stats(result, filename)
 
 
@@ -839,7 +838,6 @@ def _order_vs_reltimes(userdata, relative_times_by_user, filename):
                 result[j].append(reltimes[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
     _compare_kstest(result, filename)
-    _fit_gamma(result, filename)
     _plot_stats(result, filename)
 
 
