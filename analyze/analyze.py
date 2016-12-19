@@ -355,7 +355,7 @@ def _make_boxplot(data, labels, filename):
 
 
 def _switch_vs_not(userdata, filename):
-    """Analyze data and make box plots of relative times"""
+    """Analyze data and make box plots of times"""
     switch = []
     notswitch = []
     for user in userdata:
@@ -382,6 +382,20 @@ def _switch_vs_not_relative(userdata, relative_times_by_user, filename):
     _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
 
 
+def _get_not_switch_indices(userdata):
+    """Get array of booleans indicating whether there was a topic switch"""
+    not_switch_indices = np.ones(1)
+    for _, data in userdata.items():
+        cur_not_switch_indices = \
+            data[:-1, 2] == \
+            data[1:, 2]
+        if len(not_switch_indices) < len(cur_not_switch_indices):
+            not_switch_indices = cur_not_switch_indices
+    # the first item is considered a switch
+    not_switch_indices = np.insert(not_switch_indices, 0, False)
+    return not_switch_indices
+
+
 def _numlabeled_vs_time(userdata, filename):
     """Analyze data and plot number of documents labeled vs. time"""
     bins = []
@@ -390,12 +404,7 @@ def _numlabeled_vs_time(userdata, filename):
     # every row is now the ith time for each user
     bins = np.array(bins).T
 
-    user = next(iter(userdata.keys()))
-    not_switch_indices = \
-        userdata[user][:-1, 2] == \
-        userdata[user][1:, 2]
-    # the first item is considered a switch
-    not_switch_indices = np.insert(not_switch_indices, 0, False)
+    not_switch_indices = _get_not_switch_indices(userdata)
     switch_indices = np.nonzero(np.logical_not(not_switch_indices))[0]
     major_locator = FixedLocator(switch_indices+1)
     major_formatter = FixedFormatter([str(i+1) for i in switch_indices])
@@ -416,12 +425,7 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     # every row is now the ith relative time for each user
     bins = np.array(bins).T
 
-    user = next(iter(userdata.keys()))
-    not_switch_indices = \
-        userdata[user][:-1, 2] == \
-        userdata[user][1:, 2]
-    # the first item is considered a switch
-    not_switch_indices = np.insert(not_switch_indices, 0, False)
+    not_switch_indices = _get_not_switch_indices(userdata)
     switch_indices = np.nonzero(np.logical_not(not_switch_indices))[0]
     major_locator = FixedLocator(switch_indices+1)
     major_formatter = FixedFormatter([str(i+1) for i in switch_indices])
