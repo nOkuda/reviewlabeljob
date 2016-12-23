@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
-from scipy.stats import kstest, ks_2samp, gamma
+from scipy.stats import kstest, ks_2samp, gamma, mannwhitneyu
 from sklearn.linear_model import LinearRegression
 
 import GPy
@@ -643,8 +643,8 @@ def _plot_matrix(data, cmap, colorbar, filename):
     plt.close()
 
 
-def _compare_kstest(sampleses, filename):
-    """Plots Kolmogorov-Smirnov test results
+def _compare_test(sampleses, stat_test, test_name, filename):
+    """Plots statistical test results
 
     Assuming that filename ends with ".pdf"
     """
@@ -654,14 +654,22 @@ def _compare_kstest(sampleses, filename):
         test_stats.append([])
         test_pvals.append([])
         for other in sampleses[:16]:
-            stat, pval = ks_2samp(samples, other)
+            stat, pval = stat_test(samples, other)
             test_stats[-1].append(stat)
             test_pvals[-1].append(pval)
     test_pvals = np.array(test_pvals)
     np.savetxt('test_pvals.txt', test_pvals)
 
-    _plot_table(test_pvals, plt.cm.YlGn_r, True, filename[:-4]+'_pvals.pdf')
-    _plot_matrix(test_pvals, plt.cm.YlGn_r, True, filename[:-4]+'_pvals_mat.pdf')
+    _plot_table(
+        test_pvals,
+        plt.cm.YlGn_r,
+        True,
+        filename[:-4]+'_'+test_name+'_pvals.pdf')
+    _plot_matrix(
+        test_pvals,
+        plt.cm.YlGn_r,
+        True,
+        filename[:-4]+'_'+test_name+'_pvals_mat.pdf')
 
     sig_pvals = []
     for row in test_pvals:
@@ -673,11 +681,27 @@ def _compare_kstest(sampleses, filename):
             [
                 list(plt.cm.YlGn(0.0)),
                 list(plt.cm.YlGn(1.0))]))
-    _plot_table(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals.pdf')
-    _plot_matrix(np.array(sig_pvals), cmap, False, filename[:-4]+'_sigpvals_mat.pdf')
+    _plot_table(
+        np.array(sig_pvals),
+        cmap,
+        False,
+        filename[:-4]+'_'+test_name+'_sigpvals.pdf')
+    _plot_matrix(
+        np.array(sig_pvals),
+        cmap,
+        False,
+        filename[:-4]+'_'+test_name+'_sigpvals_mat.pdf')
 
-    _plot_table(np.array(test_stats), plt.cm.YlGn, True, filename[:-4]+'_stats.pdf')
-    _plot_matrix(np.array(test_stats), plt.cm.YlGn, True, filename[:-4]+'_stats_mat.pdf')
+    _plot_table(
+        np.array(test_stats),
+        plt.cm.YlGn,
+        True,
+        filename[:-4]+'_'+test_name+'_stats.pdf')
+    _plot_matrix(
+        np.array(test_stats),
+        plt.cm.YlGn,
+        True,
+        filename[:-4]+'_'+test_name+'_stats_mat.pdf')
 
 
 def _pad_num(i):
@@ -727,7 +751,7 @@ def _fit_gamma(sampleses, filename):
 
 def _plot_stats(sampleses, filename):
     """Plot sample means, medians, and variances for the first 16 samples
-s
+
     Assuming that filename ends with ".pdf"
     Also spits out text file with data
     """
@@ -774,10 +798,12 @@ s
             ofh.write(str(men)+' '+str(med)+' '+str(vari)+'\n')
 
 
-def _order_vs_times(userdata, filename):
+def _order_vs_times(userdata, stat_tests, filename):
     """Analyze data and make plots of document number within topic vs. times
 
-    Also plot Kolmogorov-Smirnov test of first 16 in order against each other
+    Also plot statistical tests of first 16 in order against each other
+     * stat_tests :: {'name': function}
+        A dictionary of name, function pairs
     """
     max_same = 0
     for _, data in userdata.items():
@@ -805,15 +831,18 @@ def _order_vs_times(userdata, filename):
             for j in range(same_counts[i]):
                 result[j].append(times[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
-    _compare_kstest(result, filename)
+    for test_name, stat_test in stat_tests.items():
+        _compare_test(result, stat_test, test_name, filename)
     _plot_stats(result, filename)
 
 
-def _order_vs_reltimes(userdata, relative_times_by_user, filename):
+def _order_vs_reltimes(userdata, relative_times_by_user, stat_tests, filename):
     """Analyze data and make plots of document number within topic vs. relative
     times
 
-    Also plot Kolmogorov-Smirnov test of first 16 in order against each other
+    Also plot statistical tests of first 16 in order against each other
+     * stat_tests :: {'name': function}
+        A dictionary of name, function pairs
     """
     max_same = 0
     for user, data in userdata.items():
@@ -841,8 +870,13 @@ def _order_vs_reltimes(userdata, relative_times_by_user, filename):
             for j in range(same_counts[i]):
                 result[j].append(reltimes[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
-    _compare_kstest(result, filename)
+    for test_name, stat_test in stat_tests.items():
+        _compare_test(result, stat_test, test_name, filename)
     _plot_stats(result, filename)
+
+
+def _mannwhitneyu_helper(x, y):
+    return mannwhitneyu(x, y, alternative='greater')
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -850,6 +884,7 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
     s_checker = DivergenceChecker(divergence, titles)
     relative_times_by_user = _get_relative_times(userdata)
+    """
     # total time spent vs. final accuracy
     _totaltime_vs_finalscore(
         userdata,
@@ -942,14 +977,20 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
+    """
+    stat_tests = {
+        'ks': ks_2samp,
+        'mwu': _mannwhitneyu_helper}
     # box plot:  relative times per document within group
     _order_vs_reltimes(
         userdata,
         relative_times_by_user,
+        stat_tests,
         os.path.join(outdir, 'order_reltime.pdf'))
     # box plot:  times per document within group
     _order_vs_times(
         userdata,
+        stat_tests,
         os.path.join(outdir, 'order_time.pdf'))
     # TODO bar plot:  change in time as number of topics labeled increases
 
