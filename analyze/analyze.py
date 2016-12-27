@@ -559,15 +559,17 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
     _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
-def _plot_table(data, cmap, display_value, filename):
+def _plot_table(data, cmap, highlighter, filename):
     """Plot a table
 
      * data :: 2-D np.array
         the data to be tabulated
      * cmap :: matplotlib.colors.Colormap
-        the colormap to use
-     * display_value :: boolean
-        whether to display the value in the cell
+        the colormap to use; this will be scaled according to the absolute value
+        of the data
+     * highlighter :: float -> boolean
+        function that determines whether the numbers shown are highlighted or
+        not
      * filename :: str
         ouptut file name
     """
@@ -575,12 +577,18 @@ def _plot_table(data, cmap, display_value, filename):
     fig, axis = plt.subplots(1, 1)
     axis.set_axis_off()
     table = matplotlib.table.Table(axis, bbox=[0, 0, 1, 1])
+    dmin, dmax = np.min(np.abs(data)), np.max(np.abs(data))
+    def colorer(val):
+        """Returns the proper color depending on val
+
+        It is assumed that dmin <= val <= dmax
+        """
+        vrange = dmax - dmin
+        return cmap((abs(val) - dmin) / vrange)
     nrows, ncols = data.shape
     width, height = 1.0/ncols, 1.0/nrows
     for (i, j), datum in np.ndenumerate(data):
-        text = ''
-        if display_value:
-            text = str(round(datum, 3))
+        text = str(round(datum, 3))
         table.add_cell(
             i,
             j,
@@ -588,10 +596,10 @@ def _plot_table(data, cmap, display_value, filename):
             height,
             text=text,
             loc='center',
-            facecolor=cmap(datum))
+            facecolor=colorer(datum))
         color = (0.0, 0.0, 0.0, 0.75)
         weight = 'normal'
-        if datum < 0.05:
+        if highlighter(datum):
             color = 'c'
             weight = 'bold'
         cell = table.get_celld()[(i, j)]
@@ -643,7 +651,7 @@ def _plot_matrix(data, cmap, colorbar, filename):
     plt.close()
 
 
-def _compare_test(sampleses, stat_test, test_name, filename):
+def _compare_test(sampleses, comparer, filename):
     """Plots statistical test results
 
     Assuming that filename ends with ".pdf"
@@ -654,7 +662,7 @@ def _compare_test(sampleses, stat_test, test_name, filename):
         test_stats.append([])
         test_pvals.append([])
         for other in sampleses[:16]:
-            stat, pval = stat_test(samples, other)
+            stat, pval = comparer.stat_test(samples, other)
             test_stats[-1].append(stat)
             test_pvals[-1].append(pval)
     test_pvals = np.array(test_pvals)
@@ -663,45 +671,19 @@ def _compare_test(sampleses, stat_test, test_name, filename):
     _plot_table(
         test_pvals,
         plt.cm.YlGn_r,
-        True,
-        filename[:-4]+'_'+test_name+'_pvals.pdf')
-    _plot_matrix(
-        test_pvals,
-        plt.cm.YlGn_r,
-        True,
-        filename[:-4]+'_'+test_name+'_pvals_mat.pdf')
+        comparer.pval_highlighter,
+        filename[:-4]+'_'+comparer.test_name+'_pvals.pdf')
 
     sig_pvals = []
     for row in test_pvals:
         sig_pvals.append([])
         for val in row:
             sig_pvals[-1].append(1.0 if val < 0.05 else 0.0)
-    cmap = matplotlib.colors.ListedColormap(
-        np.array(
-            [
-                list(plt.cm.YlGn(0.0)),
-                list(plt.cm.YlGn(1.0))]))
-    _plot_table(
-        np.array(sig_pvals),
-        cmap,
-        False,
-        filename[:-4]+'_'+test_name+'_sigpvals.pdf')
-    _plot_matrix(
-        np.array(sig_pvals),
-        cmap,
-        False,
-        filename[:-4]+'_'+test_name+'_sigpvals_mat.pdf')
-
     _plot_table(
         np.array(test_stats),
         plt.cm.YlGn,
-        True,
-        filename[:-4]+'_'+test_name+'_stats.pdf')
-    _plot_matrix(
-        np.array(test_stats),
-        plt.cm.YlGn,
-        True,
-        filename[:-4]+'_'+test_name+'_stats_mat.pdf')
+        comparer.stat_highlighter,
+        filename[:-4]+'_'+comparer.test_name+'_stats.pdf')
 
 
 def _pad_num(i):
@@ -798,12 +780,10 @@ def _plot_stats(sampleses, filename):
             ofh.write(str(men)+' '+str(med)+' '+str(vari)+'\n')
 
 
-def _order_vs_times(userdata, stat_tests, filename):
+def _order_vs_times(userdata, comparers, filename):
     """Analyze data and make plots of document number within topic vs. times
 
     Also plot statistical tests of first 16 in order against each other
-     * stat_tests :: {'name': function}
-        A dictionary of name, function pairs
     """
     max_same = 0
     for _, data in userdata.items():
@@ -831,18 +811,16 @@ def _order_vs_times(userdata, stat_tests, filename):
             for j in range(same_counts[i]):
                 result[j].append(times[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
-    for test_name, stat_test in stat_tests.items():
-        _compare_test(result, stat_test, test_name, filename)
+    for comparer in comparers:
+        _compare_test(result, comparer, filename)
     _plot_stats(result, filename)
 
 
-def _order_vs_reltimes(userdata, relative_times_by_user, stat_tests, filename):
+def _order_vs_reltimes(userdata, relative_times_by_user, comparers, filename):
     """Analyze data and make plots of document number within topic vs. relative
     times
 
     Also plot statistical tests of first 16 in order against each other
-     * stat_tests :: {'name': function}
-        A dictionary of name, function pairs
     """
     max_same = 0
     for user, data in userdata.items():
@@ -870,13 +848,47 @@ def _order_vs_reltimes(userdata, relative_times_by_user, stat_tests, filename):
             for j in range(same_counts[i]):
                 result[j].append(reltimes[switch+j])
     _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
-    for test_name, stat_test in stat_tests.items():
-        _compare_test(result, stat_test, test_name, filename)
+    for comparer in comparers:
+        _compare_test(result, comparer, filename)
     _plot_stats(result, filename)
 
 
+class Comparer:
+    """Class to encapsulate functions and data for statistical tests"""
+
+    def __init__(
+            self,
+            test_name,
+            stat_test,
+            pval_highlighter,
+            stat_highlighter):
+        """Constructor"""
+        self.test_name = test_name
+        self.stat_test = stat_test
+        self.pval_highlighter = pval_highlighter
+        self.stat_highlighter = stat_highlighter
+
+
 def _mannwhitneyu_helper(x, y):
-    return mannwhitneyu(x, y, alternative='greater')
+    """Return common language effect size and p-value"""
+    u, pval = mannwhitneyu(x, y, alternative='greater')
+    count = 0
+    for first in x:
+        for second in y:
+            if first > second:
+                count += 1
+    total = len(x) * len(y)
+    return float(count) / float(total), pval
+
+
+def _pval_five(val):
+    """Check whether val < 0.05"""
+    return val < 0.05
+
+
+def _abs_stat(val):
+    """Check whether abs(val) > 0.6"""
+    return abs(val) > 0.6
 
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
@@ -978,9 +990,9 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         relative_times_by_user,
         os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
     """
-    stat_tests = {
-        'ks': ks_2samp,
-        'mwu': _mannwhitneyu_helper}
+    stat_tests = [
+        Comparer('ks', ks_2samp, _pval_five, _pval_five),
+        Comparer('mwu', _mannwhitneyu_helper, _pval_five, _abs_stat)]
     # box plot:  relative times per document within group
     _order_vs_reltimes(
         userdata,
