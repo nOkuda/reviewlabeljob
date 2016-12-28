@@ -810,7 +810,8 @@ def _order_vs_times(userdata, comparers, filename):
         for i, switch in enumerate(switch_indices):
             for j in range(same_counts[i]):
                 result[j].append(times[switch+j])
-    _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
+    # I want information for the first 16 only
+    _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
         _compare_test(result, comparer, filename)
     _plot_stats(result, filename)
@@ -847,7 +848,8 @@ def _order_vs_reltimes(userdata, relative_times_by_user, comparers, filename):
         for i, switch in enumerate(switch_indices):
             for j in range(same_counts[i]):
                 result[j].append(reltimes[switch+j])
-    _make_boxplot(result, [str(i+1) for i in range(max_same)], filename)
+    # I want information for the first 16 only
+    _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
         _compare_test(result, comparer, filename)
     _plot_stats(result, filename)
