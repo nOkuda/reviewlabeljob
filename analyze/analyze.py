@@ -62,6 +62,9 @@ def _parse_args():
     parser.add_argument(
         'titles',
         help='file path to pickle containing ordered titles')
+    parser.add_argument(
+        'postsurvey',
+        help='file path to post survey data')
     return parser.parse_args()
 
 
@@ -126,7 +129,8 @@ def _plot2d_linear(xdata, ydata, _, axis):
     plotx = np.linspace(xdata.min(), xdata.max())
     axis.plot(
         plotx,
-        linreg.predict(plotx.reshape(len(plotx), 1)))
+        linreg.predict(plotx.reshape(len(plotx), 1)),
+        linewidth=3)
     axis.set_title('Linear Regression ($r^2$ = ' + str(corr) + ')')
 
 
@@ -754,8 +758,18 @@ def _plot_stats(sampleses, filename):
     first_quartile_distance = np.array(medians) - np.array(first_quartile)
     third_quartile_distance = np.array(third_quartile) - np.array(medians)
 
+    barwidth = 0.8
+    xlim = [-0.5, 15.5]
+
     fig, axis = plt.subplots(1, 1)
-    axis.bar(ind, means, alpha=0.9, yerr=std_devs)
+    axis.bar(
+        ind,
+        means,
+        width=barwidth,
+        alpha=0.9,
+        yerr=std_devs,
+        align='center')
+    axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_means.pdf', bbox_inches='tight')
     plt.close()
 
@@ -763,14 +777,18 @@ def _plot_stats(sampleses, filename):
     axis.bar(
         ind,
         medians,
+        width=barwidth,
         alpha=0.9,
-        yerr=[first_quartile_distance, third_quartile_distance])
+        yerr=[first_quartile_distance, third_quartile_distance],
+        align='center')
+    axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_medians.pdf', bbox_inches='tight')
     plt.close()
 
     fig, axis = plt.subplots(1, 1)
     ind = np.arange(16)
-    axis.bar(ind, variances, alpha=0.9)
+    axis.bar(ind, variances, width=barwidth, alpha=0.9, align='center')
+    axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_vars.pdf', bbox_inches='tight')
     plt.close()
 
@@ -780,16 +798,22 @@ def _plot_stats(sampleses, filename):
             ofh.write(str(men)+' '+str(med)+' '+str(vari)+'\n')
 
 
-def _order_vs_times(userdata, comparers, filename):
-    """Analyze data and make plots of document number within topic vs. times
-
-    Also plot statistical tests of first 16 in order against each other
-    """
-    max_same = 0
-    for _, data in userdata.items():
+def _get_switch_indiceses(userdata):
+    """Calculate switch indices for each user"""
+    result = {}
+    for user, data in userdata.items():
         switches = data[:-1, 2] != data[1:, 2]
         switches = np.insert(switches, 0, True)
-        switch_indices = np.nonzero(switches)[0]
+        # get indices where switches occur
+        result[user] = np.nonzero(switches)[0]
+    return result
+
+
+def _get_max_same(userdata, switch_indiceses):
+    """Get the maxium number of documents with the same top topic in a row"""
+    max_same = 0
+    for user, data in userdata.items():
+        switch_indices = switch_indiceses[user]
         same_counts = switch_indices[1:] - switch_indices[:-1]
         same_counts = np.append(
             same_counts,
@@ -797,19 +821,62 @@ def _order_vs_times(userdata, comparers, filename):
         for count in same_counts:
             if count > max_same:
                 max_same = count
+    return max_same
+
+
+def _build_data_times(_, data):
+    """Get time data (in seconds)"""
+    return (data[:, 1] - data[:, 0]) / 1000
+
+
+def _build_data_reltimes(relative_times_by_user):
+    """Build function for build relative times data"""
+    def _inner(user, _):
+        """Get relative times data"""
+        return relative_times_by_user[user]
+    return _inner
+
+
+def _build_data_doclength(corpus):
+    """Build function for build document length data"""
+    def _inner(_, data):
+        """Get document length data"""
+        docids = data[:, 3]
+        doclengths = [len(corpus[str(a)]['text'].split()) for a in docids]
+        return doclengths
+    return _inner
+
+
+def _aggregate_order_data(userdata, switch_indiceses, max_same, build_data):
+    """Aggregate data for _order_vs_* functions
+
+    We want to collect data into bins such that the first bin has data with
+    respect to the first documents in a topical group, etc.
+    """
     result = [[] for _ in range(max_same)]
-    for _, data in userdata.items():
-        times = (data[:, 1] - data[:, 0]) / 1000
-        switches = data[:-1, 2] != data[1:, 2]
-        switches = np.insert(switches, 0, True)
-        switch_indices = np.nonzero(switches)[0]
+    for user, data in userdata.items():
+        resultdata = build_data(user, data)
+        switch_indices = switch_indiceses[user]
         same_counts = switch_indices[1:] - switch_indices[:-1]
         same_counts = np.append(
             same_counts,
             data[:, 2].shape[0] - switch_indices[-1])
         for i, switch in enumerate(switch_indices):
             for j in range(same_counts[i]):
-                result[j].append(times[switch+j])
+                result[j].append(resultdata[switch+j])
+    return result
+
+
+def _order_vs_times(userdata, switch_indiceses, max_same, comparers, filename):
+    """Analyze data and make plots of document number within topic vs. times
+
+    Also plot statistical tests of first 16 in order against each other
+    """
+    result = _aggregate_order_data(
+        userdata,
+        switch_indiceses,
+        max_same,
+        _build_data_times)
     # I want information for the first 16 only
     _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
@@ -817,37 +884,44 @@ def _order_vs_times(userdata, comparers, filename):
     _plot_stats(result, filename)
 
 
-def _order_vs_reltimes(userdata, relative_times_by_user, comparers, filename):
+def _order_vs_doclength(
+        userdata,
+        switch_indiceses,
+        max_same,
+        corpus,
+        comparers,
+        filename):
+    """Analyze data and make plots of document number within topic vs. document
+    lengths
+
+    Also plot statistical tests of first 16 in order against each other
+    """
+    result = _aggregate_order_data(
+        userdata,
+        switch_indiceses,
+        max_same,
+        _build_data_doclength(corpus))
+    for comparer in comparers:
+        _compare_test(result, comparer, filename)
+
+
+def _order_vs_reltimes(
+        userdata,
+        switch_indiceses,
+        max_same,
+        relative_times_by_user,
+        comparers,
+        filename):
     """Analyze data and make plots of document number within topic vs. relative
     times
 
     Also plot statistical tests of first 16 in order against each other
     """
-    max_same = 0
-    for user, data in userdata.items():
-        switches = data[:-1, 2] != data[1:, 2]
-        switches = np.insert(switches, 0, True)
-        switch_indices = np.nonzero(switches)[0]
-        same_counts = switch_indices[1:] - switch_indices[:-1]
-        same_counts = np.append(
-            same_counts,
-            data[:, 2].shape[0] - switch_indices[-1])
-        for count in same_counts:
-            if count > max_same:
-                max_same = count
-    result = [[] for _ in range(max_same)]
-    for user, data in userdata.items():
-        reltimes = relative_times_by_user[user]
-        switches = data[:-1, 2] != data[1:, 2]
-        switches = np.insert(switches, 0, True)
-        switch_indices = np.nonzero(switches)[0]
-        same_counts = switch_indices[1:] - switch_indices[:-1]
-        same_counts = np.append(
-            same_counts,
-            data[:, 2].shape[0] - switch_indices[-1])
-        for i, switch in enumerate(switch_indices):
-            for j in range(same_counts[i]):
-                result[j].append(reltimes[switch+j])
+    result = _aggregate_order_data(
+        userdata,
+        switch_indiceses,
+        max_same,
+        _build_data_reltimes(relative_times_by_user))
     # I want information for the first 16 only
     _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
@@ -898,6 +972,8 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
     s_checker = DivergenceChecker(divergence, titles)
     relative_times_by_user = _get_relative_times(userdata)
+    switch_indiceses = _get_switch_indiceses(userdata)
+    max_same = _get_max_same(userdata, switch_indiceses)
     """
     # total time spent vs. final accuracy
     _totaltime_vs_finalscore(
@@ -911,11 +987,13 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         true_labels_by_user,
         os.path.join(outdir, 'totaltime_finalmae.pdf'),
         _score_eval_helper(_mean_absolute_error))
+    """
     # document length vs. time spent
     _doclength_vs_time(
         userdata,
         corpus,
         os.path.join(outdir, 'doclength_time.pdf'))
+    """
     # JS divergence of switch topics vs. time spent
     _docdiv_vs_other(
         userdata,
@@ -996,17 +1074,82 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         Comparer('ks', ks_2samp, _pval_five, _pval_five),
         Comparer('mwu', _mannwhitneyu_helper, _pval_five, _abs_stat)]
     # box plot:  relative times per document within group
+    """
     _order_vs_reltimes(
         userdata,
+        switch_indiceses,
+        max_same,
         relative_times_by_user,
         stat_tests,
         os.path.join(outdir, 'order_reltime.pdf'))
     # box plot:  times per document within group
     _order_vs_times(
         userdata,
+        switch_indiceses,
+        max_same,
         stat_tests,
         os.path.join(outdir, 'order_time.pdf'))
+    # statistical tests:  lengths per document within group
+    _order_vs_doclength(
+        userdata,
+        switch_indiceses,
+        max_same,
+        corpus,
+        stat_tests,
+        os.path.join(outdir, 'order_doclength.pdf'))
+    """
     # TODO bar plot:  change in time as number of topics labeled increases
+
+
+def _parse_postsurvey(filepath):
+    """Parse post survey data"""
+    result = []
+    with open(filepath) as ifh:
+        for line in ifh:
+            line = line.strip()
+            if line:
+                if line.startswith('#'):
+                    continue
+                result.append([int(a) for a in line.split('\t')])
+    return np.array(result)
+
+
+def _plot_postsurvey_bar(filename, data):
+    """Plot and save bar chart"""
+    fig, axis = plt.subplots(1, 1)
+    axis.bar(
+        np.arange(5),
+        data,
+        width=0.8,
+        alpha=0.9,
+        align='center',
+        tick_label=[
+            'Strongly\ndisagree',
+            'Disagree',
+            'Neither\nagree nor disagree',
+            'Agree\n',
+            'Strongly\nagree'])
+    axis.set_xlim([-0.5, 4.5])
+    fig.savefig(filename, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_postsurvey(filepath, outdir):
+    """Plot post survey data"""
+    data = _parse_postsurvey(filepath)
+    print(
+        'Number of females, number of males:',
+        np.sum(data[:, 0] == 0),
+        ',',
+        np.sum(data[:, 0] == 1))
+    harder_counts = [np.sum(data[:, 1] == a) for a in range(5)]
+    moretime_counts = [np.sum(data[:, 2] == a) for a in range(5)]
+    _plot_postsurvey_bar(
+        os.path.join(outdir, 'harder.pdf'),
+        harder_counts)
+    _plot_postsurvey_bar(
+        os.path.join(outdir, 'moretime.pdf'),
+        moretime_counts)
 
 
 def _run():
@@ -1017,6 +1160,7 @@ def _run():
     divergence = np.load(args.divergence)
     titles = grab_pickle(args.titles)
     _analyze_data(userdata, corpus, divergence, titles, args.o)
+    # _plot_postsurvey(args.postsurvey, args.o)
 
 
 if __name__ == '__main__':
