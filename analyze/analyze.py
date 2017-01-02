@@ -13,6 +13,7 @@ from scipy.stats import kstest, ks_2samp, gamma, mannwhitneyu
 from sklearn.linear_model import LinearRegression
 
 import GPy
+import parsedata
 
 
 #pylint:disable-msg=too-few-public-methods
@@ -66,56 +67,6 @@ def _parse_args():
         'postsurvey',
         help='file path to post survey data')
     return parser.parse_args()
-
-
-def _get_data(datadir):
-    """Parse data files
-
-    For each data file, there is a matrix.
-        * the 0th column is the start time (in milliseconds)
-        * the 1st column is the end time (in milliseconds)
-        * the 2nd column is the topic number
-        * the 3rd column is the document id
-        * the 4th column is the user's label
-    All values in the matrix are integers.
-    """
-    data = {}
-    for filename in os.listdir(datadir):
-        filename_name, filename_ext = os.path.splitext(filename)
-        if filename_ext == '.data':
-            parsed_data = []
-            with open(os.path.join(datadir, filename)) as ifh:
-                for line in ifh:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    parsed_data.append([int(a) for a in line.split()])
-            data[filename_name] = np.array(parsed_data)
-    return data
-
-
-def grab_pickle(filename):
-    """Load pickle"""
-    with open(filename, 'rb') as ifh:
-        return pickle.load(ifh)
-
-
-def _get_true_labels(corpus, titles):
-    """Get true labels of documents"""
-    result = []
-    for title in titles:
-        result.append(corpus[title]['label'])
-    return np.array(result)
-
-
-def _get_true_labels_by_user(userdata, corpus):
-    """Get true labels by user"""
-    true_labels_by_user = {}
-    for user in userdata:
-        true_labels_by_user[user] = _get_true_labels(
-            corpus,
-            [str(a) for a in userdata[user][:, 3]])
-    return true_labels_by_user
 
 
 #pylint:disable-msg=no-member
@@ -969,7 +920,7 @@ def _abs_stat(val):
 
 def _analyze_data(userdata, corpus, divergence, titles, outdir):
     """Analyze data"""
-    true_labels_by_user = _get_true_labels_by_user(userdata, corpus)
+    true_labels_by_user = parsedata.get_true_labels_by_user(userdata, corpus)
     s_checker = DivergenceChecker(divergence, titles)
     relative_times_by_user = _get_relative_times(userdata)
     switch_indiceses = _get_switch_indiceses(userdata)
@@ -1155,10 +1106,10 @@ def _plot_postsurvey(filepath, outdir):
 def _run():
     """Run analysis"""
     args = _parse_args()
-    userdata = _get_data(args.userdata)
-    corpus = grab_pickle(args.corpus)
+    userdata = parsedata.get_data(args.userdata)
+    corpus = parsedata.grab_pickle(args.corpus)
     divergence = np.load(args.divergence)
-    titles = grab_pickle(args.titles)
+    titles = parsedata.grab_pickle(args.titles)
     _analyze_data(userdata, corpus, divergence, titles, args.o)
     # _plot_postsurvey(args.postsurvey, args.o)
 
