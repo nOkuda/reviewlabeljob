@@ -1,0 +1,11 @@
+# corpus options
+pickle  cost_label_corpus.pickle
+corpus  amazon.txt
+labels  amazon.response
+
+# filter options
+stopwords   stopwords.txt
+rare    50
+common  40000
+smalldoc    30
+pregenerate YES

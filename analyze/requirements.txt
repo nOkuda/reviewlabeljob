@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+-e git+https://github.com/jlund3/ankura#egg=ankura
+-e git+https://github.com/nOkuda/activetm#egg=activetm
+sklearn
+GPy
