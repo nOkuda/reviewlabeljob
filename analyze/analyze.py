@@ -613,10 +613,10 @@ def _compare_test(sampleses, comparer, filename):
     """
     test_stats = []
     test_pvals = []
-    for samples in sampleses[:16]:
+    for samples in sampleses:
         test_stats.append([])
         test_pvals.append([])
-        for other in sampleses[:16]:
+        for other in sampleses:
             stat, pval = comparer.stat_test(samples, other)
             test_stats[-1].append(stat)
             test_pvals[-1].append(pval)
@@ -691,6 +691,9 @@ def _plot_stats(sampleses, filename):
 
     Assuming that filename ends with ".pdf"
     Also spits out text file with data
+
+        * sampleses :: [[float]]
+        * filename :: str
     """
     means = []
     std_devs = []
@@ -698,19 +701,19 @@ def _plot_stats(sampleses, filename):
     first_quartile = []
     third_quartile = []
     variances = []
-    for samples in sampleses[:16]:
+    for samples in sampleses:
         means.append(np.mean(samples))
         std_devs.append(np.std(samples))
         medians.append(np.median(samples))
         first_quartile.append(np.percentile(samples, 25))
         third_quartile.append(np.percentile(samples, 75))
         variances.append(np.var(samples))
-    ind = np.arange(16)
+    ind = np.arange(len(sampleses))
     first_quartile_distance = np.array(medians) - np.array(first_quartile)
     third_quartile_distance = np.array(third_quartile) - np.array(medians)
 
     barwidth = 0.8
-    xlim = [-0.5, 15.5]
+    xlim = [-0.5, len(sampleses) - 0.5]
 
     fig, axis = plt.subplots(1, 1)
     axis.bar(
@@ -737,7 +740,6 @@ def _plot_stats(sampleses, filename):
     plt.close()
 
     fig, axis = plt.subplots(1, 1)
-    ind = np.arange(16)
     axis.bar(ind, variances, width=barwidth, alpha=0.9, align='center')
     axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_vars.pdf', bbox_inches='tight')
@@ -773,6 +775,15 @@ def _get_max_same(userdata, switch_indiceses):
             if count > max_same:
                 max_same = count
     return max_same
+
+
+def _get_max_topics(switch_indiceses):
+    """Get the maximum number of topical groups"""
+    max_topics = 0
+    for _, data in switch_indiceses.items():
+        if len(data) > max_topics:
+            max_topics = len(data)
+    return max_topics
 
 
 def _build_data_times(_, data):
@@ -818,6 +829,21 @@ def _aggregate_order_data(userdata, switch_indiceses, max_same, build_data):
     return result
 
 
+def _aggregate_firsts_data(userdata, switch_indiceses, max_topics, build_data):
+    """Aggregate data for _firsts_vs_* functions
+
+    We want to collect data into bins such that the first bin has data with
+    respect to the first document in the first topical groups, etc.
+    """
+    result = [[] for _ in range(max_topics)]
+    for user, data in userdata.items():
+        resultdata = build_data(user, data)
+        switch_indices = switch_indiceses[user]
+        for i, switch in enumerate(switch_indices):
+            result[i].append(resultdata[switch])
+    return result
+
+
 def _order_vs_times(userdata, switch_indiceses, max_same, comparers, filename):
     """Analyze data and make plots of document number within topic vs. times
 
@@ -831,8 +857,30 @@ def _order_vs_times(userdata, switch_indiceses, max_same, comparers, filename):
     # I want information for the first 16 only
     _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
-        _compare_test(result, comparer, filename)
-    _plot_stats(result, filename)
+        _compare_test(result[:16], comparer, filename)
+    _plot_stats(result[:16], filename)
+
+
+def _firsts_vs_times(
+        userdata,
+        switch_indiceses,
+        max_topics,
+        comparers,
+        filename):
+    """Analyze data and make plots of first documents within topic vs. times
+
+    Also plot statistical tests of first 5 in order against each other
+    """
+    result = _aggregate_firsts_data(
+        userdata,
+        switch_indiceses,
+        max_topics,
+        _build_data_times)
+    # I want information for 5
+    _make_boxplot(result[:5], [str(i) for i in range(5)], filename)
+    for comparer in comparers:
+        _compare_test(result[:5], comparer, filename)
+    _plot_stats(result[:5], filename)
 
 
 def _order_vs_doclength(
@@ -853,7 +901,7 @@ def _order_vs_doclength(
         max_same,
         _build_data_doclength(corpus))
     for comparer in comparers:
-        _compare_test(result, comparer, filename)
+        _compare_test(result[:16], comparer, filename)
 
 
 def _order_vs_reltimes(
@@ -876,8 +924,8 @@ def _order_vs_reltimes(
     # I want information for the first 16 only
     _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
     for comparer in comparers:
-        _compare_test(result, comparer, filename)
-    _plot_stats(result, filename)
+        _compare_test(result[:16], comparer, filename)
+    _plot_stats(result[:16], filename)
 
 
 class Comparer:
@@ -898,7 +946,7 @@ class Comparer:
 
 def _mannwhitneyu_helper(x, y):
     """Return common language effect size and p-value"""
-    u, pval = mannwhitneyu(x, y, alternative='greater')
+    _, pval = mannwhitneyu(x, y, alternative='greater')
     count = 0
     for first in x:
         for second in y:
@@ -925,6 +973,7 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     relative_times_by_user = _get_relative_times(userdata)
     switch_indiceses = _get_switch_indiceses(userdata)
     max_same = _get_max_same(userdata, switch_indiceses)
+    max_topics = _get_max_topics(switch_indiceses)
     """
     # total time spent vs. final accuracy
     _totaltime_vs_finalscore(
@@ -938,13 +987,11 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         true_labels_by_user,
         os.path.join(outdir, 'totaltime_finalmae.pdf'),
         _score_eval_helper(_mean_absolute_error))
-    """
     # document length vs. time spent
     _doclength_vs_time(
         userdata,
         corpus,
         os.path.join(outdir, 'doclength_time.pdf'))
-    """
     # JS divergence of switch topics vs. time spent
     _docdiv_vs_other(
         userdata,
@@ -1024,8 +1071,8 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     stat_tests = [
         Comparer('ks', ks_2samp, _pval_five, _pval_five),
         Comparer('mwu', _mannwhitneyu_helper, _pval_five, _abs_stat)]
-    # box plot:  relative times per document within group
     """
+    # box plot:  relative times per document within group
     _order_vs_reltimes(
         userdata,
         switch_indiceses,
@@ -1049,7 +1096,13 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         stat_tests,
         os.path.join(outdir, 'order_doclength.pdf'))
     """
-    # TODO bar plot:  change in time as number of topics labeled increases
+    # box plot:  times per first documents after topic switch
+    _firsts_vs_times(
+        userdata,
+        switch_indiceses,
+        max_topics,
+        stat_tests,
+        os.path.join(outdir, 'firsts_time.pdf'))
 
 
 def _parse_postsurvey(filepath):

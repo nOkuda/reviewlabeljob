@@ -1,7 +1,8 @@
 #!/bin/bash
 
 python3 analyze.py \
-    ../userData/ \
+    studydata/ \
     ../filedict.pickle \
     ../simil.npy \
-    ../titles.pickle
+    ../titles.pickle \
+    studydata/postsurvey.tsv
