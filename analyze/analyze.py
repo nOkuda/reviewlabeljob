@@ -566,7 +566,7 @@ def _plot_table(data, cmap, highlighter, filename):
             -1,
             width,
             height,
-            text=str(i),
+            text=str(i+1),
             loc='right',
             edgecolor='none',
             facecolor='none')
@@ -576,7 +576,7 @@ def _plot_table(data, cmap, highlighter, filename):
             j,
             width,
             height,
-            text=str(j),
+            text=str(j+1),
             loc='center',
             edgecolor='none',
             facecolor='none')
@@ -708,12 +708,12 @@ def _plot_stats(sampleses, filename):
         first_quartile.append(np.percentile(samples, 25))
         third_quartile.append(np.percentile(samples, 75))
         variances.append(np.var(samples))
-    ind = np.arange(len(sampleses))
+    ind = np.arange(len(sampleses)) + 1
     first_quartile_distance = np.array(medians) - np.array(first_quartile)
     third_quartile_distance = np.array(third_quartile) - np.array(medians)
 
     barwidth = 0.8
-    xlim = [-0.5, len(sampleses) - 0.5]
+    xlim = [0.5, len(sampleses) + 0.5]
 
     fig, axis = plt.subplots(1, 1)
     axis.bar(
@@ -877,7 +877,7 @@ def _firsts_vs_times(
         max_topics,
         _build_data_times)
     # I want information for 5
-    _make_boxplot(result[:5], [str(i) for i in range(5)], filename)
+    _make_boxplot(result[:5], [str(i+1) for i in range(5)], filename)
     for comparer in comparers:
         _compare_test(result[:5], comparer, filename)
     _plot_stats(result[:5], filename)
@@ -974,7 +974,6 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
     switch_indiceses = _get_switch_indiceses(userdata)
     max_same = _get_max_same(userdata, switch_indiceses)
     max_topics = _get_max_topics(switch_indiceses)
-    """
     # total time spent vs. final accuracy
     _totaltime_vs_finalscore(
         userdata,
@@ -1067,11 +1066,9 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         relative_times_by_user,
         os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
-    """
     stat_tests = [
         Comparer('ks', ks_2samp, _pval_five, _pval_five),
         Comparer('mwu', _mannwhitneyu_helper, _pval_five, _abs_stat)]
-    """
     # box plot:  relative times per document within group
     _order_vs_reltimes(
         userdata,
@@ -1095,7 +1092,6 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         corpus,
         stat_tests,
         os.path.join(outdir, 'order_doclength.pdf'))
-    """
     # box plot:  times per first documents after topic switch
     _firsts_vs_times(
         userdata,
@@ -1164,7 +1160,7 @@ def _run():
     divergence = np.load(args.divergence)
     titles = parsedata.grab_pickle(args.titles)
     _analyze_data(userdata, corpus, divergence, titles, args.o)
-    # _plot_postsurvey(args.postsurvey, args.o)
+    _plot_postsurvey(args.postsurvey, args.o)
 
 
 if __name__ == '__main__':
