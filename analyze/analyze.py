@@ -1,7 +1,6 @@
 """Script to analyze user study data"""
 import argparse
 import os
-import pickle
 
 import matplotlib
 matplotlib.use('Agg')
@@ -11,6 +10,7 @@ from matplotlib.ticker import FixedLocator, FixedFormatter
 import numpy as np
 from scipy.stats import kstest, ks_2samp, gamma, mannwhitneyu
 from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge
 
 import GPy
 import parsedata
@@ -70,7 +70,7 @@ def _parse_args():
 
 
 #pylint:disable-msg=no-member
-def _plot2d_linear(xdata, ydata, _, axis):
+def _plot2d_linear(xdata, ydata, _, axis, line_color):
     """Fits a linear regression to the data and plots regression line"""
     linreg = LinearRegression()
     regx = xdata.reshape((len(xdata), 1))
@@ -81,12 +81,14 @@ def _plot2d_linear(xdata, ydata, _, axis):
     axis.plot(
         plotx,
         linreg.predict(plotx.reshape(len(plotx), 1)),
+        color=line_color,
+        solid_capstyle='round',
         linewidth=3)
-    axis.set_title('Linear Regression ($r^2$ = ' + str(corr) + ')')
+    axis.set_title('$R^2$ = ' + str(corr))
 
 
 #pylint:disable-msg=no-member
-def _plot2d_gaussian(xdata, ydata, _, axis):
+def _plot2d_gaussian(xdata, ydata, _, axis, line_color):
     """Fit a Gaussian process to the data and plots the regression"""
     sortedx = np.sort(xdata)
     meandist = np.mean(sortedx[1:] - sortedx[:-1])
@@ -101,23 +103,24 @@ def _plot2d_gaussian(xdata, ydata, _, axis):
     plotx = np.linspace(xdata.min(), xdata.max(), 200)
     plotx = plotx.reshape((plotx.size, 1))
     pred_mean, _ = gpr.predict(plotx)
-    pred_line = axis.plot(
+    axis.plot(
         plotx,
         pred_mean,
+        color=line_color,
         alpha=0.8,
-        linewidth=3)[0]
+        linewidth=3)
     pred_quants = gpr.predict_quantiles(plotx, quantiles=(25., 75.))
     axis.plot(
         plotx,
         pred_quants[0],
-        color=pred_line.get_color(),
+        color=line_color,
         alpha=0.8,
         linestyle='dashed',
         linewidth=1.5)
     axis.plot(
         plotx,
         pred_quants[1],
-        color=pred_line.get_color(),
+        color=line_color,
         alpha=0.8,
         linestyle='dashed',
         linewidth=1.5)
@@ -131,8 +134,17 @@ def _plot2d(filename, xdata, ydata, plot_helper):
     kwargs.
     """
     fig, axis = plt.subplots(1, 1)
-    axis.scatter(xdata, ydata, alpha=0.5)
-    plot_helper(xdata, ydata, fig, axis)
+    color_list = matplotlib.rcParams['axes.prop_cycle'].by_key()['color']
+    axis.plot(
+        xdata,
+        ydata,
+        alpha=0.5,
+        linestyle='None',
+        marker='o',
+        markersize=3,
+        markeredgewidth=0,
+        markerfacecolor=color_list[0])
+    plot_helper(xdata, ydata, fig, axis, color_list[1])
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
 
@@ -393,6 +405,12 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     plt.close()
 
 
+def _get_doclengths_for_user(userdata, user, corpus):
+    """Get doclengths for documents labeled by user"""
+    docids = userdata[user][:, 3]
+    return np.array([len(corpus[str(a)]['text'].split()) for a in docids])
+
+
 def _multiregression_helper(
         userdata,
         s_checker,
@@ -405,12 +423,12 @@ def _multiregression_helper(
     final_reltimes = []
     doc_divs = []
     for user, data in userdata.items():
-        docids = data[:, 3]
-        curdoclengths = [len(corpus[str(a)]['text'].split()) for a in docids]
+        curdoclengths = _get_doclengths_for_user(userdata, user, corpus)
         doclengths.extend(curdoclengths)
         final_doclengths.extend(curdoclengths[1:])
         reltimes.extend(relative_times_by_user[user])
         final_reltimes.extend(relative_times_by_user[user][1:])
+        docids = data[:, 3]
         divs = [
             s_checker.find_div(str(a), str(b)) \
             for a, b in zip(docids[:-1], docids[1:])]
@@ -471,16 +489,49 @@ def _doclength_docdiv_vs_reltime(
             relative_times_by_user)
 
     regr = LinearRegression()
+    inputs = np.array(
+        [[a, b] for a, b in zip(final_doclengths.ravel(), doc_divs)])
     regr.fit(
-        np.array(
-            [[a, b] for a, b in zip(final_doclengths.ravel(), doc_divs)]),
+        inputs,
         final_reltimes)
-    xcoords = np.linspace(0, np.max(final_doclengths), 100)
-    ycoords = np.linspace(0, np.max(doc_divs), 100)
+    _plot_heatmap(
+        'doclengths',
+        0,
+        np.max(final_doclengths),
+        'docdivs',
+        0,
+        np.max(doc_divs),
+        regr,
+        regr.score(inputs, final_reltimes),
+        filename)
+
+
+def make_format_function(lmin, lmax, intervals):
+    """Return function that scales input tick value to correct label"""
+    lrange = lmax - lmin
+    def _inner(xval, _):
+        """Return correct label"""
+        return (lrange * xval / intervals) + lmin
+    return _inner
+
+
+def _plot_heatmap(
+        xlabel,
+        xmin,
+        xmax,
+        ylabel,
+        ymin,
+        ymax,
+        predictor,
+        r2,
+        filename):
+    """Plot heatmap"""
+    xcoords = np.linspace(xmin, xmax, 100)
+    ycoords = np.linspace(ymin, ymax, 100)
     predictions = []
     for ycoord in ycoords:
         predictions.append(
-            regr.predict(
+            predictor.predict(
                 np.array(
                     [
                         xcoords,
@@ -488,10 +539,17 @@ def _doclength_docdiv_vs_reltime(
     fig, axis = plt.subplots(1, 1)
     plot = axis.matshow(
         np.array(predictions),
-        cmap=plt.cm.YlGn,
-        vmin=0.0,
-        vmax=1.0)
+        cmap=plt.cm.YlGn)
     axis.grid()
+    axis.set_title("$R^2$ = "+str(r2))
+    axis.set_xlabel(xlabel)
+    axis.xaxis.set_major_formatter(
+        matplotlib.ticker.FuncFormatter(
+            make_format_function(xmin, xmax, 100)))
+    axis.set_ylabel(ylabel)
+    axis.yaxis.set_major_formatter(
+        matplotlib.ticker.FuncFormatter(
+            make_format_function(ymin, ymax, 100)))
     plt.colorbar(plot)
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
@@ -514,14 +572,14 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
     _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
 
 
-def _plot_table(data, cmap, highlighter, filename):
+DECIMAL_PLACES = 5
+def _plot_table(data, colorer, highlighter, filename):
     """Plot a table
 
      * data :: 2-D np.array
         the data to be tabulated
-     * cmap :: matplotlib.colors.Colormap
-        the colormap to use; this will be scaled according to the absolute value
-        of the data
+     * colorer :: float -> hsva
+        function that determines the color of the cell
      * highlighter :: float -> boolean
         function that determines whether the numbers shown are highlighted or
         not
@@ -532,18 +590,10 @@ def _plot_table(data, cmap, highlighter, filename):
     fig, axis = plt.subplots(1, 1)
     axis.set_axis_off()
     table = matplotlib.table.Table(axis, bbox=[0, 0, 1, 1])
-    dmin, dmax = np.min(np.abs(data)), np.max(np.abs(data))
-    def colorer(val):
-        """Returns the proper color depending on val
-
-        It is assumed that dmin <= val <= dmax
-        """
-        vrange = dmax - dmin
-        return cmap((abs(val) - dmin) / vrange)
     nrows, ncols = data.shape
     width, height = 1.0/ncols, 1.0/nrows
     for (i, j), datum in np.ndenumerate(data):
-        text = str(round(datum, 3))
+        text = str(round(datum, DECIMAL_PLACES))
         table.add_cell(
             i,
             j,
@@ -555,7 +605,7 @@ def _plot_table(data, cmap, highlighter, filename):
         color = (0.0, 0.0, 0.0, 0.75)
         weight = 'normal'
         if highlighter(datum):
-            color = 'c'
+            color = (0.0, 0.0, 0.0, 1.0)
             weight = 'bold'
         cell = table.get_celld()[(i, j)]
         cell.get_text().set_color(color)
@@ -606,6 +656,27 @@ def _plot_matrix(data, cmap, colorbar, filename):
     plt.close()
 
 
+def _pval_colorer(pval_highlighter, cmap):
+    """Returns function to color p-value cells"""
+    def _inner(value):
+        """Returns hsva color based on the value"""
+        if pval_highlighter(value):
+            return cmap(0.0)
+        return cmap(1.0)
+    return _inner
+
+
+def _stat_colorer(stats, cmap):
+    """Returns function to color statistic cells"""
+    smin = np.min(stats)
+    smax = np.max(stats)
+    sdiff = smax - smin
+    def _inner(value):
+        """Returns hsva color based on the value"""
+        return cmap((value - smin) / (sdiff))
+    return _inner
+
+
 def _compare_test(sampleses, comparer, filename):
     """Plots statistical test results
 
@@ -625,7 +696,7 @@ def _compare_test(sampleses, comparer, filename):
 
     _plot_table(
         test_pvals,
-        plt.cm.YlGn_r,
+        _pval_colorer(comparer.pval_highlighter, plt.cm.YlGn),
         comparer.pval_highlighter,
         filename[:-4]+'_'+comparer.test_name+'_pvals.pdf')
 
@@ -636,7 +707,7 @@ def _compare_test(sampleses, comparer, filename):
             sig_pvals[-1].append(1.0 if val < 0.05 else 0.0)
     _plot_table(
         np.array(test_stats),
-        plt.cm.YlGn,
+        _stat_colorer(np.array(test_stats), plt.cm.YlGn_r),
         comparer.stat_highlighter,
         filename[:-4]+'_'+comparer.test_name+'_stats.pdf')
 
@@ -722,6 +793,7 @@ def _plot_stats(sampleses, filename):
         width=barwidth,
         alpha=0.9,
         yerr=std_devs,
+        capsize=barwidth*2,
         align='center')
     axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_means.pdf', bbox_inches='tight')
@@ -734,13 +806,20 @@ def _plot_stats(sampleses, filename):
         width=barwidth,
         alpha=0.9,
         yerr=[first_quartile_distance, third_quartile_distance],
+        capsize=barwidth*2,
         align='center')
     axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_medians.pdf', bbox_inches='tight')
     plt.close()
 
     fig, axis = plt.subplots(1, 1)
-    axis.bar(ind, variances, width=barwidth, alpha=0.9, align='center')
+    axis.bar(
+        ind,
+        variances,
+        width=barwidth,
+        capsize=barwidth*2,
+        alpha=0.9,
+        align='center')
     axis.set_xlim(xlim)
     fig.savefig(filename[:-4]+'_vars.pdf', bbox_inches='tight')
     plt.close()
@@ -928,6 +1007,60 @@ def _order_vs_reltimes(
     _plot_stats(result[:16], filename)
 
 
+def _add_one(xval, _):
+    """Add one"""
+    return int(xval + 1)
+
+
+def _regression_surface(
+        userdata,
+        switch_indiceses,
+        corpus,
+        filename):
+    """Analyze data and make plot of document position and length vs. labeling
+    time.
+    """
+    doclengths = []
+    positions = []
+    times = []
+    for user, data in userdata.items():
+        curdoclengths = _get_doclengths_for_user(userdata, user, corpus)
+        switch_indices = switch_indiceses[user]
+        user_times = _build_data_times(user, data)
+        for i in range(1, len(switch_indices)):
+            if switch_indices[i] - switch_indices[i-1] == 16:
+                doclengths.extend(
+                    curdoclengths[switch_indices[i-1]:switch_indices[i]])
+                positions.extend(np.arange(1, 17))
+                times.extend(
+                    user_times[switch_indices[i-1]:switch_indices[i]])
+    doclengths = np.array(doclengths)
+    positions = np.array(positions)
+    times = np.array(times)
+    model_inputs = np.stack((doclengths, positions), axis=-1)
+    ridge_model = Ridge()
+    ridge_model.fit(model_inputs, times)
+    r2 = ridge_model.score(model_inputs, times)
+    fig, axis = plt.subplots(1, 1)
+    xdata = np.arange(1, 17)
+    for doclength in [30, 50, 100, 200, 500, 1000]:
+        inputs = np.stack((np.array([doclength]*len(xdata)), xdata), axis=-1)
+        ydata = ridge_model.predict(inputs)
+        axis.plot(
+            xdata,
+            ydata,
+            linewidth=2,
+            label=str(doclength))
+        # apparently, all of the lines go down by 6.02762577314 from first
+        # labeling time to 16th
+        # axis.annotate(str(ydata[0] - ydata[-1]), (xdata[-1], ydata[-1]))
+    box = axis.get_position()
+    axis.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+    axis.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    axis.set_title('$R^2=$'+str(r2))
+    fig.savefig(filename, bbox_inches='tight')
+
+
 class Comparer:
     """Class to encapsulate functions and data for statistical tests"""
 
@@ -956,9 +1089,14 @@ def _mannwhitneyu_helper(x, y):
     return float(count) / float(total), pval
 
 
-def _pval_five(val):
-    """Check whether val < 0.05"""
-    return val < 0.05
+def _pval_256(val):
+    """Check whether val < 0.05 / (16*16)"""
+    return val < 0.0001953125
+
+
+def _pval_25(val):
+    """Check whether val < 0.05 / (5*5)"""
+    return val < 0.002
 
 
 def _abs_stat(val):
@@ -1067,8 +1205,8 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         relative_times_by_user,
         os.path.join(outdir, 'firsts_lasts_relativetimes.pdf'))
     stat_tests = [
-        Comparer('ks', ks_2samp, _pval_five, _pval_five),
-        Comparer('mwu', _mannwhitneyu_helper, _pval_five, _abs_stat)]
+        Comparer('ks', ks_2samp, _pval_256, _pval_256),
+        Comparer('mwu', _mannwhitneyu_helper, _pval_256, _abs_stat)]
     # box plot:  relative times per document within group
     _order_vs_reltimes(
         userdata,
@@ -1093,12 +1231,21 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         stat_tests,
         os.path.join(outdir, 'order_doclength.pdf'))
     # box plot:  times per first documents after topic switch
+    stat_tests_25 = [
+        Comparer('ks', ks_2samp, _pval_256, _pval_256),
+        Comparer('mwu', _mannwhitneyu_helper, _pval_256, _abs_stat)]
     _firsts_vs_times(
         userdata,
         switch_indiceses,
         max_topics,
-        stat_tests,
+        stat_tests_25,
         os.path.join(outdir, 'firsts_time.pdf'))
+    # regression surface
+    _regression_surface(
+        userdata,
+        switch_indiceses,
+        corpus,
+        os.path.join(outdir, 'regression_surface.pdf'))
 
 
 def _parse_postsurvey(filepath):
