@@ -16,7 +16,7 @@ import GPy
 import parsedata
 
 
-#pylint:disable-msg=too-few-public-methods
+# pylint:disable-msg=too-few-public-methods
 class DivergenceChecker():
     """Class for looking up document divergences"""
 
@@ -48,12 +48,12 @@ def _parse_args():
     parser.add_argument(
         '-o',
         default='.',
-        help='directory where output is to be placed; default is current ' +\
-            'working directory')
+        help='directory where output is to be placed; default is current ' +
+             'working directory')
     parser.add_argument(
         'userdata',
-        help='directory where data is stored; assuming the data files end ' +\
-            'in ".data"')
+        help='directory where data is stored; assuming the data files end ' +
+             'in ".data"')
     parser.add_argument(
         'corpus',
         help='file path to pickle containing corpus information')
@@ -69,7 +69,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-#pylint:disable-msg=no-member
+# pylint:disable-msg=no-member
 def _plot2d_linear(xdata, ydata, _, axis, line_color):
     """Fits a linear regression to the data and plots regression line"""
     linreg = LinearRegression()
@@ -87,7 +87,7 @@ def _plot2d_linear(xdata, ydata, _, axis, line_color):
     axis.set_title('$R^2$ = ' + str(corr))
 
 
-#pylint:disable-msg=no-member
+# pylint:disable-msg=no-member
 def _plot2d_gaussian(xdata, ydata, _, axis, line_color):
     """Fit a Gaussian process to the data and plots the regression"""
     sortedx = np.sort(xdata)
@@ -127,7 +127,7 @@ def _plot2d_gaussian(xdata, ydata, _, axis, line_color):
     axis.set_title('Gaussian Process')
 
 
-def _plot2d(filename, xdata, ydata, plot_helper):
+def _plot2d(filename, xdata, ydata, plot_helper, xlabel, ylabel):
     """Plot data as scatter with regression
 
     Opacity settings are dealt with in this function, so don't include alpha in
@@ -145,6 +145,8 @@ def _plot2d(filename, xdata, ydata, plot_helper):
         markeredgewidth=0,
         markerfacecolor=color_list[0])
     plot_helper(xdata, ydata, fig, axis, color_list[1])
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
 
@@ -174,22 +176,30 @@ def _totaltime_vs_finalscore(
         userdata,
         true_labels_by_user,
         filename,
-        score_eval):
+        score_eval,
+        ylabel):
     """Analyze data and plot total time vs. final score, as per score_eval"""
     users = sorted(userdata.keys())
     # note that there are 60000 milliseconds per minute
     xdata = np.array(
         [
-            float(userdata[user][-1, 1] - userdata[user][0, 0]) / 60000 \
+            float(userdata[user][-1, 1] - userdata[user][0, 0]) / 60000
             for user in users])
     ydata = score_eval(
         [userdata[user][:, -1] for user in users],
         [true_labels_by_user[user] for user in users])
-    _plot2d(filename, xdata, ydata, _plot2d_linear)
+    _plot2d(
+        filename,
+        xdata,
+        ydata,
+        _plot2d_linear,
+        'Time (minutes)',
+        ylabel)
 
 
 def _doclength_vs_time(userdata, corpus, filename):
-    """Analyze data and plot document length vs. time spent labeling document"""
+    """Analyze data and plot document length vs. time spent labeling document
+    """
     xdata = []
     ydata = []
     for user in userdata:
@@ -198,10 +208,16 @@ def _doclength_vs_time(userdata, corpus, filename):
         xdata.extend(doclengths)
         # 1000 milliseconds per second
         times = [
-            float(a) / 1000 \
+            float(a) / 1000
             for a in (userdata[user][:, 1] - userdata[user][:, 0])]
         ydata.extend(times)
-    _plot2d(filename, np.array(xdata), np.array(ydata), _plot2d_linear)
+    _plot2d(
+        filename,
+        np.array(xdata),
+        np.array(ydata),
+        _plot2d_linear,
+        'Document length (number of tokens)',
+        'Time (seconds)')
 
 
 def _extract_time(_, usermatrix):
@@ -223,7 +239,7 @@ def _extract_runningaccdiff(true_labels_by_user):
         truelabels = true_labels_by_user[user]
         accuracies = truelabels == usermatrix[:, 4]
         runningacc = np.array([
-            float(np.sum(accuracies[:a])) / float(a + 1) \
+            float(np.sum(accuracies[:a])) / float(a + 1)
             for a in range(len(accuracies))])
         return runningacc[1:] - runningacc[:-1]
     return _inner
@@ -236,7 +252,7 @@ def _extract_runningtotalaccdiff(true_labels_by_user):
         truelabels = true_labels_by_user[user]
         accuracies = truelabels == usermatrix[:, 4]
         runningtotalacc = np.array([
-            float(np.sum(accuracies[:a])) / float(len(accuracies)) \
+            float(np.sum(accuracies[:a])) / float(len(accuracies))
             for a in range(len(accuracies))])
         return runningtotalacc[1:] - runningtotalacc[:-1]
     return _inner
@@ -249,7 +265,7 @@ def _extract_runningmeanerrdiff(true_labels_by_user):
         truelabels = true_labels_by_user[user]
         errors = np.abs(truelabels - usermatrix[:, 4])
         runningmeanerr = np.array([
-            float(np.sum(errors[:a])) / float(a + 1) \
+            float(np.sum(errors[:a])) / float(a + 1)
             for a in range(len(errors))])
         return runningmeanerr[1:] - runningmeanerr[:-1]
     return _inner
@@ -277,26 +293,32 @@ def _other_eval_helper(extractor):
     return _inner
 
 
-def _docdiv_vs_other(userdata, s_checker, filename, other_eval):
+def _docdiv_vs_other(userdata, s_checker, filename, other_eval, ylabel):
     """Analyze data and plot document divergence vs. time spent labeling"""
     xdata = []
     ydata = []
     for user in userdata:
         docids = userdata[user][:, 3]
         divs = [
-            s_checker.find_div(str(a), str(b)) \
+            s_checker.find_div(str(a), str(b))
             for a, b in zip(docids[:-1], docids[1:])]
         xdata.extend(divs)
         others = other_eval(user, userdata[user])
         ydata.extend(others)
-    _plot2d(filename, np.array(xdata), np.array(ydata), _plot2d_linear)
+    _plot2d(
+        filename,
+        np.array(xdata),
+        np.array(ydata),
+        _plot2d_linear,
+        'Document divergence',
+        ylabel)
 
 
 def _get_relative_times(userdata):
     """Calculate relative times by user
 
-    Relative time here means the proportion to the max time spent labeling for a
-    given user.
+    Relative time here means the proportion to the max time spent labeling for
+    a given user.
     """
     result = {}
     for user in userdata:
@@ -309,7 +331,7 @@ def _get_relative_times(userdata):
     return result
 
 
-def _make_boxplot(data, labels, filename):
+def _make_boxplot(data, labels, filename, xlabel, ylabel):
     """Plot boxplots"""
     fig, axis = plt.subplots(1, 1)
     axis.boxplot(data, labels=labels)
@@ -317,6 +339,8 @@ def _make_boxplot(data, labels, filename):
         test_stat, pval = ks_2samp(data[0], data[1])
         axis.set_title(
             'KS: test_stat=' + str(test_stat) + '; pval=' + str(pval))
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
 
@@ -332,7 +356,12 @@ def _switch_vs_not(userdata, filename):
         not_switch_indices = np.insert(not_switch_indices, 0, False)
         notswitch.extend(times[not_switch_indices])
         switch.extend(times[np.logical_not(not_switch_indices)])
-    _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
+    _make_boxplot(
+        [switch, notswitch],
+        ['switch', 'not switch'],
+        filename,
+        '',
+        'Time (seconds)')
 
 
 def _switch_vs_not_relative(userdata, relative_times_by_user, filename):
@@ -346,7 +375,12 @@ def _switch_vs_not_relative(userdata, relative_times_by_user, filename):
         not_switch_indices = np.insert(not_switch_indices, 0, False)
         notswitch.extend(reltimes[not_switch_indices])
         switch.extend(reltimes[np.logical_not(not_switch_indices)])
-    _make_boxplot([switch, notswitch], ['switch', 'not switch'], filename)
+    _make_boxplot(
+        [switch, notswitch],
+        ['switch', 'not switch'],
+        filename,
+        '',
+        'Relative time (% of participant\'s longest labeling time)')
 
 
 def _get_not_switch_indices(userdata):
@@ -380,6 +414,8 @@ def _numlabeled_vs_time(userdata, filename):
     axis.boxplot([b for b in bins])
     axis.xaxis.set_major_locator(major_locator)
     axis.xaxis.set_major_formatter(major_formatter)
+    axis.set_xlabel('Number of documents labeled')
+    axis.set_ylabel('Time (seconds)')
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
 
@@ -401,6 +437,9 @@ def _numlabeled_vs_reltime(userdata, relative_times_by_user, filename):
     axis.boxplot([b for b in bins])
     axis.xaxis.set_major_locator(major_locator)
     axis.xaxis.set_major_formatter(major_formatter)
+    axis.set_xlabel('Number of documents labeled')
+    axis.set_ylabel(
+        'Relative time (% of participant\'s longest labeling time)')
     fig.savefig(filename, bbox_inches='tight')
     plt.close()
 
@@ -430,7 +469,7 @@ def _multiregression_helper(
         final_reltimes.extend(relative_times_by_user[user][1:])
         docids = data[:, 3]
         divs = [
-            s_checker.find_div(str(a), str(b)) \
+            s_checker.find_div(str(a), str(b))
             for a, b in zip(docids[:-1], docids[1:])]
         doc_divs.extend(divs)
     doclengths = np.array(doclengths).reshape((len(doclengths), 1))
@@ -442,7 +481,7 @@ def _multiregression_helper(
     return doclengths, reltimes, final_doclengths, final_reltimes, doc_divs
 
 
-#pylint:disable-msg=invalid-name
+# pylint:disable-msg=invalid-name
 def _docdiv_vs_doclength_reltime_residuals(
         userdata,
         s_checker,
@@ -466,10 +505,16 @@ def _docdiv_vs_doclength_reltime_residuals(
     predictions = doclength_vs_reltime.predict(final_doclengths)
     residuals = np.abs(final_reltimes - predictions)
 
-    _plot2d(filename, doc_divs, residuals, _plot2d_linear)
+    _plot2d(
+        filename,
+        doc_divs,
+        residuals,
+        _plot2d_linear,
+        'Document length vs. document divergence residual',
+        'Relative time (% of participant\'s longest labeling time)')
 
 
-#pylint:disable-msg=too-many-locals
+# pylint:disable-msg=too-many-locals
 def _doclength_docdiv_vs_reltime(
         userdata,
         s_checker,
@@ -509,6 +554,7 @@ def _doclength_docdiv_vs_reltime(
 def make_format_function(lmin, lmax, intervals):
     """Return function that scales input tick value to correct label"""
     lrange = lmax - lmin
+
     def _inner(xval, _):
         """Return correct label"""
         return (lrange * xval / intervals) + lmin
@@ -569,7 +615,12 @@ def _firsts_vs_lasts_reltimes(userdata, relative_times_by_user, filename):
             firsts.extend(reltimes[firsts_indices])
             lasts_indices = switch_indices-(i+1)
             lasts.extend(reltimes[lasts_indices])
-    _make_boxplot([firsts, lasts], ['firsts', 'lasts'], filename)
+    _make_boxplot(
+        [firsts, lasts],
+        ['firsts', 'lasts'],
+        filename,
+        '',
+        'Relative time (% of participant\'s longest labeling time)')
 
 
 DECIMAL_PLACES = 5
@@ -671,6 +722,7 @@ def _stat_colorer(stats, cmap):
     smin = np.min(stats)
     smax = np.max(stats)
     sdiff = smax - smin
+
     def _inner(value):
         """Returns hsva color based on the value"""
         return cmap((value - smin) / (sdiff))
@@ -745,11 +797,12 @@ def _fit_gamma(sampleses, filename):
             plotx,
             gamma.pdf(plotx, shape, loc=loc, scale=scale),
             linewidth=3)
-        axis.set_title('shape='+str(shape)+'; loc='+str(loc) + \
-            '; scale='+str(scale)+'\n' + \
-            'stat='+str(stat)+'; pval='+str(pval)+'\n' + \
-            'mean='+str(shape*scale)+'; var='+str(shape*scale*scale)+'\n' + \
-            's_mean='+str(sample_mean)+'; s_var='+str(sample_var)+'\n' + \
+        axis.set_title(
+            'shape='+str(shape)+'; loc='+str(loc) +
+            '; scale='+str(scale)+'\n' +
+            'stat='+str(stat)+'; pval='+str(pval)+'\n' +
+            'mean='+str(shape*scale)+'; var='+str(shape*scale*scale)+'\n' +
+            's_mean='+str(sample_mean)+'; s_var='+str(sample_var)+'\n' +
             's_median='+str(sample_median))
         fig.savefig(
             filename[:-4]+'_fit_'+_pad_num(i+1)+'.pdf',
@@ -757,7 +810,7 @@ def _fit_gamma(sampleses, filename):
         plt.close()
 
 
-def _plot_stats(sampleses, filename):
+def _plot_stats(sampleses, filename, xlabel, ylabel):
     """Plot sample means, medians, and variances for the first 16 samples
 
     Assuming that filename ends with ".pdf"
@@ -796,6 +849,8 @@ def _plot_stats(sampleses, filename):
         capsize=barwidth*2,
         align='center')
     axis.set_xlim(xlim)
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
     fig.savefig(filename[:-4]+'_means.pdf', bbox_inches='tight')
     plt.close()
 
@@ -809,6 +864,8 @@ def _plot_stats(sampleses, filename):
         capsize=barwidth*2,
         align='center')
     axis.set_xlim(xlim)
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
     fig.savefig(filename[:-4]+'_medians.pdf', bbox_inches='tight')
     plt.close()
 
@@ -821,6 +878,8 @@ def _plot_stats(sampleses, filename):
         alpha=0.9,
         align='center')
     axis.set_xlim(xlim)
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel('Variance')
     fig.savefig(filename[:-4]+'_vars.pdf', bbox_inches='tight')
     plt.close()
 
@@ -934,10 +993,15 @@ def _order_vs_times(userdata, switch_indiceses, max_same, comparers, filename):
         max_same,
         _build_data_times)
     # I want information for the first 16 only
-    _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
+    _make_boxplot(
+        result[:16],
+        [str(i+1) for i in range(16)],
+        filename,
+        'Document order',
+        'Time (seconds)')
     for comparer in comparers:
         _compare_test(result[:16], comparer, filename)
-    _plot_stats(result[:16], filename)
+    _plot_stats(result[:16], filename, 'Document order', 'Time (seconds)')
 
 
 def _firsts_vs_times(
@@ -956,10 +1020,15 @@ def _firsts_vs_times(
         max_topics,
         _build_data_times)
     # I want information for 5
-    _make_boxplot(result[:5], [str(i+1) for i in range(5)], filename)
+    _make_boxplot(
+        result[:5],
+        [str(i+1) for i in range(5)],
+        filename,
+        'Topical group',
+        'Time (seconds)')
     for comparer in comparers:
         _compare_test(result[:5], comparer, filename)
-    _plot_stats(result[:5], filename)
+    _plot_stats(result[:5], filename, 'Topical group', 'Time (seconds)')
 
 
 def _order_vs_doclength(
@@ -1001,10 +1070,19 @@ def _order_vs_reltimes(
         max_same,
         _build_data_reltimes(relative_times_by_user))
     # I want information for the first 16 only
-    _make_boxplot(result[:16], [str(i+1) for i in range(16)], filename)
+    _make_boxplot(
+        result[:16],
+        [str(i+1) for i in range(16)],
+        filename,
+        'Document order',
+        'Relative time (% of participant\'s longest labeling time)')
     for comparer in comparers:
         _compare_test(result[:16], comparer, filename)
-    _plot_stats(result[:16], filename)
+    _plot_stats(
+        result[:16],
+        filename,
+        'Document order',
+        'Relative time (% of participant\'s longest labeling time)')
 
 
 def _add_one(xval, _):
@@ -1056,8 +1134,11 @@ def _regression_surface(
         # axis.annotate(str(ydata[0] - ydata[-1]), (xdata[-1], ydata[-1]))
     box = axis.get_position()
     axis.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-    axis.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    legend = axis.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    legend.set_title('Document length (in tokens)')
     axis.set_title('$R^2=$'+str(r2))
+    axis.set_xlabel('Document order')
+    axis.set_ylabel('Time (seconds)')
     fig.savefig(filename, bbox_inches='tight')
 
 
@@ -1117,13 +1198,15 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         true_labels_by_user,
         os.path.join(outdir, 'totaltime_finalaccuracy.pdf'),
-        _score_eval_helper(_accuracy))
+        _score_eval_helper(_accuracy),
+        'Accuracy (% correct)')
     # total time spent vs. final average absolute error
     _totaltime_vs_finalscore(
         userdata,
         true_labels_by_user,
         os.path.join(outdir, 'totaltime_finalmae.pdf'),
-        _score_eval_helper(_mean_absolute_error))
+        _score_eval_helper(_mean_absolute_error),
+        'Mean Absolute Error')
     # document length vs. time spent
     _doclength_vs_time(
         userdata,
@@ -1134,38 +1217,45 @@ def _analyze_data(userdata, corpus, divergence, titles, outdir):
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_time.pdf'),
-        _other_eval_helper(_extract_time))
+        _other_eval_helper(_extract_time),
+        'Time (seconds)')
     # JS divergence of switch topics vs. relative time spent
     _docdiv_vs_other(
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_reltime.pdf'),
-        _other_eval_helper(_extract_reltime))
+        _other_eval_helper(_extract_reltime),
+        'Relative time (% of participant\'s longest labeling time)')
     # JS divergence of switch topics vs. running accuracy
     _docdiv_vs_other(
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_runningaccdiff.pdf'),
-        _other_eval_helper(_extract_runningaccdiff(true_labels_by_user)))
+        _other_eval_helper(_extract_runningaccdiff(true_labels_by_user)),
+        'Change in running accuracy (% correct)')
     # JS divergence of switch topics vs. running total accuracy
     _docdiv_vs_other(
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_runningtotalaccdiff.pdf'),
-        _other_eval_helper(_extract_runningtotalaccdiff(true_labels_by_user)))
+        _other_eval_helper(_extract_runningtotalaccdiff(true_labels_by_user)),
+        'Change in total accuracy (% correct)')
     # JS divergence of switch topics vs. running mean error
     _docdiv_vs_other(
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_runningmeanerrdiff.pdf'),
-        _other_eval_helper(_extract_runningmeanerrdiff(true_labels_by_user)))
+        _other_eval_helper(_extract_runningmeanerrdiff(true_labels_by_user)),
+        'Change in running mean error')
     # JS divergence of switch topics vs. running total error
     _docdiv_vs_other(
         userdata,
         s_checker,
         os.path.join(outdir, 'docdiv_runningtotalerrdiff.pdf'),
-        _other_eval_helper(_extract_runningtotalerrdiff(true_labels_by_user)))
-    # box plot:  relative time spent on switch, relative time spent not on switch
+        _other_eval_helper(_extract_runningtotalerrdiff(true_labels_by_user)),
+        'Change in total mean error')
+    # box plot:  relative time spent on switch, relative time spent not on
+    # switch
     _switch_vs_not_relative(
         userdata,
         relative_times_by_user,

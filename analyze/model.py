@@ -122,6 +122,8 @@ def _check_ridge_model(featureses, labels):
             linewidth=3)
         # plt.text(test_points[-1, 0], predictions[-1], str(tfidf_count))
     plt.legend()
+    plt.xlabel('Document order')
+    plt.ylabel('Time (seconds)')
     plt.savefig('ridge_predictions.pdf')
 
 
