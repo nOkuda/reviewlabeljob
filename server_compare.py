@@ -12,11 +12,12 @@ import flask
 APP = flask.Flask(__name__, static_url_path='')
 # users must label REQUIRED_DOCS documents
 REQUIRED_DOCS = 80
+DOCS_PER_TREATMENTS = int(REQUIRED_DOCS / 2)
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
 
 
-def get_user_dict_on_start():
+def reload_state():
     """Loads user data"""
     # This maintains state if the server crashes
     try:
@@ -27,9 +28,9 @@ def get_user_dict_on_start():
         state = pickle.load(last_state)
         print("Last state: " + str(state))
         last_state.close()
-        return state['USER_DICT']
-    # but if the server is starting fresh, so does the user data
-    return {}
+        return state['USER_DICT'], state['SERVED']
+    # the server is starting fresh
+    return {}, 0
 
 
 def grab_pickle(filename):
@@ -54,8 +55,9 @@ def get_topic(docnum):
 
 ###############################################################################
 # Everything in this block needs to be run at server startup
-# USER_DICT holds information on users
-USER_DICT = get_user_dict_on_start()
+# USER_DICT holds information on users; SERVED is the number of users served
+# thus far
+USER_DICT, SERVED = reload_state()
 LOCK = threading.Lock()
 RNG = random.Random()
 # FILEDICT is a docnumber to document dictionary
@@ -67,7 +69,19 @@ TOPTOPIC = grab_pickle(TOPTOPIC_PICKLE)
 # DOC2TOPIC is a dictionary of {docnumber: (top topic, topic prevalence)};
 # again, docnumber is a string
 DOC2TOPIC = get_doc2topic(TOPTOPIC)
-DOC_NUMS = [d for d in DOC2TOPIC]
+# Make sure that if the server goes down, we can recover which documents have
+# already been assigned for labeling
+DOCRNG = random.Random(531)
+DOC_NUMS = sorted([d for d in DOC2TOPIC])
+DOCRNG.shuffle(DOC_NUMS)
+HALF_DOCS_COUNT = int(len(DOC_NUMS)/2)
+# GROUP_SIZE must be cleverly chosen such that
+# GROUP_SIZE % DOCS_PER_TREATMENTS == 0
+GROUP_SIZE = 1000
+USERS_PER_GROUP = int(GROUP_SIZE / DOCS_PER_TREATMENTS)
+PREORDEREDS = DOC_NUMS[:HALF_DOCS_COUNT]
+ORDEREDS = None
+RANDOMS = DOC_NUMS[HALF_DOCS_COUNT:]
 NUM_TOPICS = len(TOPTOPIC)
 ###############################################################################
 
@@ -76,7 +90,9 @@ def save_state():
     """Saves the state of the server to a pickle file"""
     last_state = {}
     last_state['USER_DICT'] = USER_DICT
+    last_state['SERVED'] = SERVED
     print(USER_DICT)
+    print(SERVED)
     pickle.dump(last_state, open('last_state.pickle', 'wb'))
 
 
@@ -184,21 +200,43 @@ def cumsum(numbers):
 @APP.route('/uuid')
 def get_uid():
     """Sends a UUID to the client"""
+    global SERVED
+    global PREORDEREDS
+    global ORDEREDS
+    global RANDOMS
     uid = uuid.uuid4()
     data = {'id': uid}
+    chosens = []
     random_first = random.randint(0, 1) == 0
-    chosens = random.sample(DOC_NUMS, REQUIRED_DOCS)
-    midpoint = int(REQUIRED_DOCS / 2)
+    with LOCK:
+        if SERVED % USERS_PER_GROUP == 0:
+            modelnum = int(SERVED / USERS_PER_GROUP)
+            ORDEREDS = sorted(
+                PREORDEREDS[
+                    modelnum*GROUP_SIZE:
+                    (modelnum+1)*GROUP_SIZE],
+                key=get_topic,
+                reverse=True)
+        mynum = SERVED
+        SERVED += 1
     if random_first:
-        chosens[midpoint:] = sorted(
-            chosens[midpoint:],
-            key=get_topic,
-            reverse=True)
+        chosens.extend(
+            RANDOMS[
+                mynum*DOCS_PER_TREATMENTS:
+                (mynum+1)*DOCS_PER_TREATMENTS])
+        chosens.extend(
+            ORDEREDS[
+                ((mynum % USERS_PER_GROUP)*DOCS_PER_TREATMENTS):
+                (((mynum % USERS_PER_GROUP)+1)*DOCS_PER_TREATMENTS)])
     else:
-        chosens[:midpoint] = sorted(
-            chosens[:midpoint],
-            key=get_topic,
-            reverse=True)
+        chosens.extend(
+            ORDEREDS[
+                ((mynum % USERS_PER_GROUP)*DOCS_PER_TREATMENTS):
+                (((mynum % USERS_PER_GROUP)+1)*DOCS_PER_TREATMENTS)])
+        chosens.extend(
+            RANDOMS[
+                mynum*DOCS_PER_TREATMENTS:
+                (mynum+1)*DOCS_PER_TREATMENTS])
     with LOCK:
         USER_DICT[str(uid)] = {
             'completed': 0,
@@ -210,9 +248,15 @@ def get_uid():
     file_to_open = user_data_dir+"/"+str(uid)+".data"
     with open(file_to_open, 'a') as user_file:
         if random_first:
-            user_file.write("# Random First\n")
+            user_file.write(
+                '# ' +
+                str(int(SERVED / USERS_PER_GROUP)) +
+                ', Random First\n')
         else:
-            user_file.write('# Ordered First\n')
+            user_file.write(
+                '# ' +
+                str(int(SERVED / USERS_PER_GROUP)) +
+                ', Ordered First\n')
     save_state()
     return flask.jsonify(data)
 
