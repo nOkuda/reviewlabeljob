@@ -209,7 +209,7 @@ def get_uid():
     chosens = []
     random_first = random.randint(0, 1) == 0
     with LOCK:
-        if SERVED % USERS_PER_GROUP == 0:
+        if SERVED % USERS_PER_GROUP == 0 or not ORDEREDS:
             modelnum = int(SERVED / USERS_PER_GROUP)
             ORDEREDS = sorted(
                 PREORDEREDS[
