@@ -68,7 +68,7 @@ word (or phrase) per line.
 
 In order to generate `toptopic.pickle`, you will need to run multiple scripts.
 First, build a corpus pickle with `pickle_data.py`, available in the `activetm`
-library.  If you do now know where your Python libraries are installed, refer to
+library.  If you do not know where your Python libraries are installed, refer to
 appropriate documentation.  There are many details to the settings file required
 to run this script, and they are explained in the `activetm` README, but an
 example settings file can be found in `analyze/amazon.settings`.  You will have

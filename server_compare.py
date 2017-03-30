@@ -53,6 +53,28 @@ def get_topic(docnum):
     return DOC2TOPIC[docnum]
 
 
+def order_docs(docs, group_size):
+    """For each group_size chunk of documents, sort by top topic"""
+    result = []
+    done = 0
+    while done + group_size < len(docs):
+        result.extend(sorted(
+            docs[done:done+group_size],
+            key=get_topic,
+            reverse=True))
+        done += group_size
+    if done < len(docs):
+        # sort remaining documents
+        result.extend(sorted(
+            docs[done:],
+            key=get_topic,
+            reverse=True))
+    with open('sorted_order.txt', 'w') as ofh:
+        for docnum in result:
+            ofh.write(str(get_topic(docnum)) + '\t' + docnum + '\n')
+    return result
+
+
 ###############################################################################
 # Everything in this block needs to be run at server startup
 # USER_DICT holds information on users; SERVED is the number of users served
@@ -79,8 +101,7 @@ HALF_DOCS_COUNT = int(len(DOC_NUMS)/2)
 # GROUP_SIZE % DOCS_PER_TREATMENTS == 0
 GROUP_SIZE = 1000
 USERS_PER_GROUP = int(GROUP_SIZE / DOCS_PER_TREATMENTS)
-PREORDEREDS = DOC_NUMS[:HALF_DOCS_COUNT]
-ORDEREDS = None
+ORDEREDS = order_docs(DOC_NUMS[:HALF_DOCS_COUNT], GROUP_SIZE)
 RANDOMS = DOC_NUMS[HALF_DOCS_COUNT:]
 NUM_TOPICS = len(TOPTOPIC)
 ###############################################################################
@@ -102,7 +123,11 @@ def get_doc_info(user_id):
     correct = USER_DICT[user_id]['correct']
     if completed >= REQUIRED_DOCS:
         return 0, '', completed, correct
-    doc_number = USER_DICT[user_id]['chosens'][completed]
+    if completed >= DOCS_PER_TREATMENTS:
+        doc_number = \
+            USER_DICT[user_id]['second'][completed-DOCS_PER_TREATMENTS]
+    else:
+        doc_number = USER_DICT[user_id]['first'][completed]
     document = FILEDICT[doc_number]['text']
     return doc_number, document, completed, correct
 
@@ -201,48 +226,27 @@ def cumsum(numbers):
 def get_uid():
     """Sends a UUID to the client"""
     global SERVED
-    global PREORDEREDS
     global ORDEREDS
     global RANDOMS
     uid = uuid.uuid4()
     data = {'id': uid}
-    chosens = []
     random_first = random.randint(0, 1) == 0
     with LOCK:
-        if SERVED % USERS_PER_GROUP == 0 or not ORDEREDS:
-            modelnum = int(SERVED / USERS_PER_GROUP)
-            ORDEREDS = sorted(
-                PREORDEREDS[
-                    modelnum*GROUP_SIZE:
-                    (modelnum+1)*GROUP_SIZE],
-                key=get_topic,
-                reverse=True)
         mynum = SERVED
-        SERVED += 1
-    if random_first:
-        chosens.extend(
-            RANDOMS[
-                mynum*DOCS_PER_TREATMENTS:
-                (mynum+1)*DOCS_PER_TREATMENTS])
-        chosens.extend(
-            ORDEREDS[
-                ((mynum % USERS_PER_GROUP)*DOCS_PER_TREATMENTS):
-                (((mynum % USERS_PER_GROUP)+1)*DOCS_PER_TREATMENTS)])
-    else:
-        chosens.extend(
-            ORDEREDS[
-                ((mynum % USERS_PER_GROUP)*DOCS_PER_TREATMENTS):
-                (((mynum % USERS_PER_GROUP)+1)*DOCS_PER_TREATMENTS)])
-        chosens.extend(
-            RANDOMS[
-                mynum*DOCS_PER_TREATMENTS:
-                (mynum+1)*DOCS_PER_TREATMENTS])
-    with LOCK:
+        mystart = mynum*DOCS_PER_TREATMENTS
         USER_DICT[str(uid)] = {
             'completed': 0,
             'correct': 0,
             'cma': 0.0,
-            'chosens': chosens}
+            'first':
+                RANDOMS[mystart:mystart+DOCS_PER_TREATMENTS]
+                if random_first
+                else ORDEREDS[mystart:mystart+DOCS_PER_TREATMENTS],
+            'second':
+                ORDEREDS[mystart:mystart+DOCS_PER_TREATMENTS]
+                if random_first
+                else RANDOMS[mystart:mystart+DOCS_PER_TREATMENTS]}
+        SERVED += 1
     user_data_dir = \
         os.path.dirname(os.path.realpath(__file__)) + "/compareData"
     file_to_open = user_data_dir+"/"+str(uid)+".data"
