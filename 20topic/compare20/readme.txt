@@ -1,0 +1,12 @@
+Each filename is the uuid of the user
+
+The first line of each file is commented with a label indicating which
+treatment the user received.
+
+  The first column is the time (in milliseconds since Jan 1, 1970)
+    when the user started rating the document
+  The second column is the time (in milliseconds since Jan 1, 1970)
+    when the user finished rating the document
+  The third column is the topic of the document
+  The fourth column is the document number (from the first column in amazon.txt)
+  The fifth column is the star rating the user guessed for the review
