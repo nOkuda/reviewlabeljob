@@ -14,10 +14,10 @@ APP = flask.Flask(__name__, static_url_path='')
 REQUIRED_DOCS = 80
 DOCS_PER_TREATMENTS = int(REQUIRED_DOCS / 2)
 FILEDICT_PICKLE = 'filedict.pickle'
-TOPTOPIC_PICKLE = 'toptopic.pickle'
-LAST_STATE_PICKLE = 'last_state.pickle'
-RESULTS_DIR = 'compareData'
-SORTED_TEXT = 'sorted_order.txt'
+TOPTOPIC_PICKLE = '20topic/toptopic.pickle'
+LAST_STATE_PICKLE = '20topic/last_state_20.pickle'
+RESULTS_DIR = '20topic/compare20'
+SORTED_TEXT = '20topic/sorted_20.txt'
 
 
 def reload_state():
@@ -316,5 +316,5 @@ def get_rating():
 if __name__ == '__main__':
     APP.run(debug=True,
             host='0.0.0.0',
-            port=3000,
+            port=3020,
             threaded=True)
