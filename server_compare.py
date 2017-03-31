@@ -24,6 +24,7 @@ def reload_state():
         last_state = open('last_state.pickle', 'rb')
     except IOError:
         print('No last_state.pickle file, assuming no previous state')
+        last_state.close()
     else:
         state = pickle.load(last_state)
         print("Last state: " + str(state))
@@ -114,7 +115,8 @@ def save_state():
     last_state['SERVED'] = SERVED
     print(USER_DICT)
     print(SERVED)
-    pickle.dump(last_state, open('last_state.pickle', 'wb'))
+    with open('last_state.pickle', 'wb') as ofh:
+        pickle.dump(last_state, ofh)
 
 
 def get_doc_info(user_id):
@@ -312,4 +314,5 @@ def get_rating():
 if __name__ == '__main__':
     APP.run(debug=True,
             host='0.0.0.0',
-            port=3000)
+            port=3000,
+            threaded=True)
