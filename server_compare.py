@@ -15,7 +15,8 @@ REQUIRED_DOCS = 80
 DOCS_PER_TREATMENTS = int(REQUIRED_DOCS / 2)
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
-LAST_STATE_PICKLE = 'last_state.pickle'
+TOPICDISTANCES_PICKLE = 'topicdistances.pickle'
+LAST_STATE_PICKLE = 'last_state_compare.pickle'
 RESULTS_DIR = 'compareData'
 SORTED_TEXT = 'sorted_order.txt'
 
@@ -56,15 +57,67 @@ def get_topic(docnum):
     return DOC2TOPIC[docnum]
 
 
+def _get_topic_order(topic_starts):
+    """Generates topic order with random starting point and greedy minimum
+    divergence according to what topics are available"""
+    result = []
+    remaining = {}
+    for topic in topic_starts:
+        remaining[topic] = True
+    start = DOCRNG.choice(sorted([topic for topic in topic_starts]))
+    result.append(start)
+    print(result)
+    del remaining[start]
+    while remaining:
+        sorted_indices = [
+            b[0]
+            for b in
+            sorted(
+                enumerate(TOPICDISTANCES[result[-1]]),
+                key=lambda i:i[1])]
+        for index in sorted_indices:
+            if index in remaining:
+                result.append(index)
+                del remaining[index]
+                break
+    return result
+
+
+def _get_topic_starts(docnums):
+    """Gets indices for where a topic cluster starts in a list of top topic
+    sorted document numbers
+    """
+    result = {}
+    for i, docnum in enumerate(docnums):
+        topic = get_topic(docnum)[0]
+        if topic not in result:
+            result[topic] = i
+    return result
+
+
 def order_docs(docs, group_size):
-    """For each group_size chunk of documents, sort by top topic"""
+    """For each group_size chunk of documents, sort by top topic; then sort
+    topic clusters by topic similarity
+    """
     result = []
     done = 0
     while done + group_size < len(docs):
-        result.extend(sorted(
+        tmp = sorted(
             docs[done:done+group_size],
             key=get_topic,
-            reverse=True))
+            reverse=True)
+        topic_counts = {}
+        for docnum in tmp:
+            topic = get_topic(docnum)[0]
+            if topic not in topic_counts:
+                topic_counts[topic] = 1
+            else:
+                topic_counts[topic] += 1
+        topic_starts = _get_topic_starts(tmp)
+        topic_order = _get_topic_order(topic_starts)
+        for topic in topic_order:
+            start = topic_starts[topic]
+            result.extend(tmp[start:start+topic_counts[topic]])
         done += group_size
     if done < len(docs):
         # sort remaining documents
@@ -91,6 +144,7 @@ FILEDICT = grab_pickle(FILEDICT_PICKLE)
 # is by topic number; the inner list is sorted by prevalence of topic, high to
 # low; note that docnumber is a string
 TOPTOPIC = grab_pickle(TOPTOPIC_PICKLE)
+TOPICDISTANCES = grab_pickle(TOPICDISTANCES_PICKLE)
 # DOC2TOPIC is a dictionary of {docnumber: (top topic, topic prevalence)};
 # again, docnumber is a string
 DOC2TOPIC = get_doc2topic(TOPTOPIC)
@@ -116,7 +170,6 @@ def save_state():
     last_state['USER_DICT'] = USER_DICT
     last_state['SERVED'] = SERVED
     print(USER_DICT)
-    print(SERVED)
     with open(LAST_STATE_PICKLE, 'wb') as ofh:
         pickle.dump(last_state, ofh)
 
@@ -234,9 +287,9 @@ def get_uid():
     global RANDOMS
     uid = uuid.uuid4()
     data = {'id': uid}
-    random_first = random.randint(0, 1) == 0
     with LOCK:
         mynum = SERVED
+        random_first = mynum % 2 == 0
         mystart = mynum*DOCS_PER_TREATMENTS
         USER_DICT[str(uid)] = {
             'completed': 0,
