@@ -184,7 +184,7 @@ def get_doc_info(user_id):
     correct = USER_DICT[user_id]['correct']
     if completed >= REQUIRED_DOCS:
         return 0, '', completed, correct
-    if completed >= DOCS_PER_TREATMENTS:
+    if completed >= (DOCS_PER_TREATMENTS+HALF_LEARN_IGNORE):
         doc_number = \
             USER_DICT[user_id]['second'][
                 completed-(DOCS_PER_TREATMENTS+HALF_LEARN_IGNORE)]
