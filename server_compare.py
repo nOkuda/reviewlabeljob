@@ -11,8 +11,12 @@ import flask
 
 APP = flask.Flask(__name__, static_url_path='')
 # users must label REQUIRED_DOCS documents
-REQUIRED_DOCS = 80
-DOCS_PER_TREATMENTS = int(REQUIRED_DOCS / 2)
+REQUIRED_DOCS = 90
+DOCS_PER_TREATMENTS = 40
+# have user label some number of documents to get used to task but don't count
+# them when running statistical tests
+LEARN_IGNORE = REQUIRED_DOCS - (2 * DOCS_PER_TREATMENTS)
+HALF_LEARN_IGNORE = int(LEARN_IGNORE / 2)
 FILEDICT_PICKLE = 'filedict.pickle'
 TOPTOPIC_PICKLE = 'toptopic.pickle'
 TOPICDISTANCES_PICKLE = 'topicdistances.pickle'
@@ -182,7 +186,8 @@ def get_doc_info(user_id):
         return 0, '', completed, correct
     if completed >= DOCS_PER_TREATMENTS:
         doc_number = \
-            USER_DICT[user_id]['second'][completed-DOCS_PER_TREATMENTS]
+            USER_DICT[user_id]['second'][
+                completed-(DOCS_PER_TREATMENTS+HALF_LEARN_IGNORE)]
     else:
         doc_number = USER_DICT[user_id]['first'][completed]
     document = FILEDICT[doc_number]['text']
@@ -291,18 +296,16 @@ def get_uid():
         mynum = SERVED
         random_first = mynum % 2 == 0
         mystart = mynum*DOCS_PER_TREATMENTS
+        randoms = list(RANDOMS[-HALF_LEARN_IGNORE:])
+        randoms.extend(RANDOMS[mystart:mystart+DOCS_PER_TREATMENTS])
+        ordereds = list(ORDEREDS[-HALF_LEARN_IGNORE:])
+        ordereds.extend(ORDEREDS[mystart:mystart+DOCS_PER_TREATMENTS])
         USER_DICT[str(uid)] = {
             'completed': 0,
             'correct': 0,
             'cma': 0.0,
-            'first':
-                RANDOMS[mystart:mystart+DOCS_PER_TREATMENTS]
-                if random_first
-                else ORDEREDS[mystart:mystart+DOCS_PER_TREATMENTS],
-            'second':
-                ORDEREDS[mystart:mystart+DOCS_PER_TREATMENTS]
-                if random_first
-                else RANDOMS[mystart:mystart+DOCS_PER_TREATMENTS]}
+            'first': randoms if random_first else ordereds,
+            'second': ordereds if random_first else randoms}
         SERVED += 1
     user_data_dir = \
         os.path.join(os.path.dirname(os.path.realpath(__file__)), RESULTS_DIR)
